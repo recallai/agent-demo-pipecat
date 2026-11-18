@@ -1,0 +1,44 @@
+# Working on this sample
+
+Keep this a small Pipecat and Recall Google Meet demo, matching the final behavior
+of the sibling LiveKit sample. The launcher has one meeting-URL input.
+
+- Keep the Simli speaking avatar and HTTPS tunnel.
+- Create Google Meet bots with variant.google_meet set to web_4_core.
+- Use Pipecat's native OpenAI Realtime service for audio input and speech output.
+  The example uses REALTIME_MODEL=gpt-realtime-2.1 and REALTIME_VOICE=marin, with
+  low reasoning effort in code. The OpenAI key needs Model capabilities → Request.
+  See https://developers.openai.com/api/docs/guides/realtime-conversations.
+- app/realtime.py owns request admission and explicit input item references.
+  Input transcription is only for address and listening-resume checks. Keep
+  unrelated audio out of response context; do not restore a separate STT/LLM/TTS
+  pipeline or automatically respond to every detected speech turn.
+- Nine tools: start_screenshare, send_chat_message, send_current_page_link,
+  stop_screenshare, leave_call, mute_agent, unmute_agent, stop_listening,
+  start_listening.
+- Require Assistant or pipecat demo at the start of every request. Exclude other
+  meeting conversation from inference and prevent it from interrupting a reply.
+- Join silently and post a short command introduction in chat. Give natural,
+  useful answers: usually a few sentences, with more detail when needed. Do not
+  impose a one-sentence limit.
+- Mute controls speech only. Tools keep working. Stop listening separately ignores
+  requests except a standalone addressed start-listening command. Preserve mute
+  across listening changes. Never replay skipped speech or requests.
+- Each tool posts chat feedback; requested messages and links are their own
+  confirmation. A feedback failure must not repeat or undo an action.
+- Page sharing displays a public HTTPS URL; it does not read or control the page.
+  Preserve the last accepted URL if a later request fails. Only explicitly
+  requested actions are allowed after the startup introduction.
+- Keep responsibilities and names clear. Review files approaching 300 lines.
+  Avoid speculative abstractions and extra features.
+- Use Recall MCP docs to verify API behavior. Record documentation gaps for new
+  integration fields and verify their source implementation before using them.
+- Keep credentials in the ignored root .env or process environment. Never print
+  secrets or commit them. Do not store meeting content or recordings.
+- Use the credentials supplied for this sample and the matching Recall region.
+  Do not substitute credentials from another project or workspace.
+- Do not add evaluator code, test harnesses, verification instrumentation, or
+  reports to this repository. Run checks externally and report their limits.
+- Keep the launcher local. Public media routes must require a short-lived session token
+  and be limited to the meeting page, microphone processor, and media stream.
+- Report local checks separately from observed live meeting behavior.

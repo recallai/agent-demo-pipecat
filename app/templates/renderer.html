@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Pipecat meeting assistant</title>
+  <style>
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+    body { display: grid; place-items: center; }
+    canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+    p { color: #fff; font: 24px system-ui, sans-serif; text-align: center; }
+    [hidden] { display: none; }
+  </style>
+</head>
+<body>
+  <canvas id="avatar" width="768" height="768"></canvas>
+  <p id="status" hidden>Unable to connect the meeting assistant.</p>
+  <script>
+    const avatar = document.getElementById("avatar");
+    const drawing = avatar.getContext("2d", { alpha: false });
+    const token = encodeURIComponent(location.pathname.split("/").filter(Boolean).at(-1));
+    const audioSources = new Set();
+    let microphone, inputAudio, outputAudio, microphoneNode, socket;
+    let nextAudioTime = 0, pendingImage = null;
+    let closed = false, decodingImage = false;
+    const connectionTimer = setTimeout(() => fail("connection-timeout"), 45000);
+
+    function interruptAudio() {
+      for (const source of audioSources) source.stop();
+      audioSources.clear();
+      nextAudioTime = 0;
+    }
+
+    function close() {
+      if (closed) return;
+      closed = true;
+      clearTimeout(connectionTimer);
+      pendingImage = null;
+      interruptAudio();
+      microphone?.getTracks().forEach(track => track.stop());
+      microphoneNode?.disconnect();
+      if (inputAudio?.state !== "closed") inputAudio?.close().catch(() => {});
+      if (outputAudio?.state !== "closed") outputAudio?.close().catch(() => {});
+      socket?.close();
+    }
+
+    function fail(stage) {
+      if (closed) return;
+      console.error("Meeting assistant connection failed:", stage);
+      avatar.hidden = true;
+      document.getElementById("status").hidden = false;
+      close();
+    }
+
+    function scheduleAudio(packet) {
+      if (packet.byteLength < 3 || (packet.byteLength - 1) % 2) {
+        fail("invalid-audio");
+        return;
+      }
+      const samples = (packet.byteLength - 1) / 2;
+      const buffer = outputAudio.createBuffer(1, samples, 24000);
+      const channel = buffer.getChannelData(0);
+      const pcm = new DataView(packet, 1);
+      for (let index = 0; index < samples; index++) {
+        channel[index] = pcm.getInt16(index * 2, true) / 32768;
+      }
+      const source = outputAudio.createBufferSource();
+      source.buffer = buffer;
+      source.connect(outputAudio.destination);
+      source.onended = () => { audioSources.delete(source); source.disconnect(); };
+      audioSources.add(source);
+      // A short buffer absorbs tunnel jitter without accumulating playback delay.
+      nextAudioTime = Math.max(nextAudioTime, outputAudio.currentTime + 0.04);
+      source.start(nextAudioTime);
+      nextAudioTime += buffer.duration;
+    }
+
+    async function drawLatestImage() {
+      if (decodingImage) return;
+      decodingImage = true;
+      try {
+        while (pendingImage && !closed) {
+          const jpeg = pendingImage;
+          pendingImage = null;
+          const bitmap = await createImageBitmap(new Blob([jpeg], { type: "image/jpeg" }));
+          if (!closed) drawing.drawImage(bitmap, 0, 0, avatar.width, avatar.height);
+          bitmap.close();
+        }
+      } catch { fail("avatar-decoding"); }
+      finally { decodingImage = false; }
+    }
+
+    function receiveMedia({ data }) {
+      if (closed) return;
+      if (typeof data === "string") {
+        if (data === "interrupt") interruptAudio();
+        return;
+      }
+      const kind = new Uint8Array(data)[0];
+      if (kind === 1) scheduleAudio(data);
+      if (kind === 2) {
+        // Decode one frame at a time, replacing queued frames with the latest.
+        pendingImage = data.slice(1);
+        drawLatestImage();
+      }
+    }
+
+    function sendMicrophone({ data }) {
+      if (closed || socket?.readyState !== WebSocket.OPEN) return;
+      if (socket.bufferedAmount > 32000) { fail("microphone-backpressure"); return; }
+      socket.send(data);
+    }
+
+    async function connect() {
+      let stage = "microphone";
+      try {
+        microphone = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        if (closed) { microphone.getTracks().forEach(track => track.stop()); return; }
+        stage = "audio-context";
+        inputAudio = new AudioContext({ sampleRate: 16000 });
+        outputAudio = new AudioContext({ sampleRate: 24000 });
+        if (inputAudio.sampleRate !== 16000) { fail("microphone-sample-rate"); return; }
+        stage = "microphone-processor";
+        await inputAudio.audioWorklet.addModule(`/media/${token}/microphone.js`);
+        if (closed) return;
+        microphoneNode = new AudioWorkletNode(inputAudio, "meeting-microphone", {
+          channelCount: 1, channelCountMode: "explicit", outputChannelCount: [1],
+        });
+        microphoneNode.port.onmessage = sendMicrophone;
+        microphoneNode.onprocessorerror = () => fail("microphone-processing");
+        inputAudio.createMediaStreamSource(microphone).connect(microphoneNode);
+        // The worklet outputs silence; meeting audio must never echo into the call.
+        microphoneNode.connect(inputAudio.destination);
+        await Promise.all([inputAudio.resume(), outputAudio.resume()]);
+        if (closed) return;
+        stage = "media-socket";
+        const address = new URL(`/media/${token}/stream`, location.href);
+        address.protocol = location.protocol === "https:" ? "wss:" : "ws:";
+        socket = new WebSocket(address);
+        socket.binaryType = "arraybuffer";
+        socket.onopen = () => clearTimeout(connectionTimer);
+        socket.onmessage = receiveMedia;
+        socket.onerror = () => fail("media-socket");
+        socket.onclose = () => fail("media-disconnected");
+      } catch { fail(stage); }
+    }
+
+    window.addEventListener("pagehide", close, { once: true });
+    connect();
+  </script>
+</body>
+</html>
