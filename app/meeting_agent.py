@@ -1,4 +1,4 @@
-"""Admit addressed native audio turns before OpenAI can answer or execute tools."""
+"""Pipecat meeting agent: admit addressed native audio before replies or tools."""
 
 import time
 from collections import deque
@@ -22,7 +22,7 @@ class AdmittedResponseCreate(events.ResponseCreateEvent):
     response: AdmittedResponse
 
 
-class MeetingRealtimeService(OpenAIRealtimeLLMService):
+class MeetingAgent(OpenAIRealtimeLLMService):
     def __init__(self, state: MeetingState,
                  resume_listening: Callable[[], Awaitable[str]] | None = None, **kwargs):
         kwargs.setdefault("run_in_parallel", False)

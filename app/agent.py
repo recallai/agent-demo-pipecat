@@ -16,8 +16,8 @@ from pipecat.workers.runner import WorkerRunner
 
 from app.browser_transport import BrowserTransport
 from app.config import require_env, session_timeout
+from app.meeting_agent import MeetingAgent
 from app.meeting_tools import MeetingState, MeetingTools
-from app.realtime import MeetingRealtimeService
 from app.recall_client import RecallClient, RecallError
 from app.speech_output import AudioGate
 from app.tool_registration import register_meeting_tools
@@ -52,10 +52,9 @@ Both preserve the mute setting. Never replay skipped requests or unheard answers
 """
 
 INTRO_CHAT_MESSAGE = (
-    "Start requests with 'Assistant' or 'pipecat demo'. Try: show https://example.com; "
-    "send the page link; send a chat message; stop sharing; mute/unmute; "
-    "stop/start listening; leave the call. Mute silences speech only. "
-    "After stop listening, say 'Assistant, start listening' by itself."
+    "Start requests with 'Assistant, [command]'.\n\n"
+    "See the full list of commands here:\n"
+    "https://github.com/recallai/agent-demo-pipecat#6-try-the-agent"
 )
 
 
@@ -81,9 +80,9 @@ async def run_agent(connection, bot_id: str) -> None:
         require_env("RECALL_API_KEY"), require_env("RECALL_API_BASE_URL"),
     ) as client:
         tools = MeetingTools(client, bot_id, state, speech.silence)
-        llm = MeetingRealtimeService(
+        llm = MeetingAgent(
             state=state, resume_listening=tools.start_listening, api_key=api_key,
-            settings=MeetingRealtimeService.Settings(
+            settings=MeetingAgent.Settings(
                 model=require_env("REALTIME_MODEL"), system_instruction=INSTRUCTIONS,
                 session_properties=events.SessionProperties(
                     output_modalities=["audio"], reasoning=events.Reasoning(effort="low"),

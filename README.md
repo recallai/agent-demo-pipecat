@@ -120,17 +120,19 @@ The avatar and meeting session have a duration limit; launch another bot to repe
 | `app/web.py` | Serve the form, create a Recall bot, and run both HTTP servers. |
 | `app/templates/index.html` | Single form and request status. |
 | `app/agent.py` | Instructions, Realtime configuration, avatar startup, and cleanup. |
-| `app/media_server.py` | Expiring meeting URLs, authenticated media connections, and session cleanup. |
-| `app/browser_transport.py` | Adapt browser PCM audio and JPEG video to Pipecat frames. |
-| `app/realtime.py` | Admit addressed audio, select response context, and hold audio to keep tool calls silent. |
-| `app/request_filter.py` | Recognize agent addresses and the standalone listening-resume command. |
-| `app/speech_output.py` | Suppress muted, interrupted, and tool-confirmation audio. |
-| `app/tool_registration.py` | Describe and register the nine Pipecat tools. |
+| `app/meeting_agent.py` | Adapt Pipecat's native Realtime service: admit requests, select context, and keep tool calls silent. |
 | `app/meeting_tools.py` | Nine tools, listening/mute state, the current page URL, and chat feedback. |
+| `app/speech_output.py` | Suppress muted, interrupted, and tool-confirmation audio. |
 | `app/recall_client.py` | Recall HTTP requests, regional URL validation, and clear errors. |
 | `app/config.py` | Load `.env` and define the fixed bot name. |
+| `app/media_server.py` | Expiring meeting URLs, authenticated media connections, and session cleanup. |
+| `app/browser_transport.py` | Adapt browser PCM audio and JPEG video to Pipecat frames. |
+| `app/tool_registration.py` | Describe and register the nine Pipecat tools. |
+| `app/request_filter.py` | Recognize agent addresses and the standalone listening-resume command. |
 | `app/templates/renderer.html` | Play the avatar and stream meeting audio through the private WebSocket. |
 | `app/templates/microphone.js` | Convert meeting microphone samples to PCM audio packets. |
+
+The common files follow the [LiveKit sample](https://github.com/recallai/agent-demo-livekit#code-map): session setup in `agent.py`, framework behavior in `meeting_agent.py`, meeting actions in `meeting_tools.py`, and Recall requests in `recall_client.py`. Pipecat also needs the browser media connection and explicit tool registration shown above.
 
 Recall runs an Output Media webpage in a **four-core Google Meet bot** (`variant.google_meet = web_4_core`). The page sends meeting audio to Pipecat over the HTTPS tunnel and plays the returned voice and avatar. Five tools call Recall; four control speech and request processing locally.
 

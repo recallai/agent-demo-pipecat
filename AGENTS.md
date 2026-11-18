@@ -9,7 +9,10 @@ of the sibling LiveKit sample. The launcher has one meeting-URL input.
   The example uses REALTIME_MODEL=gpt-realtime-2.1 and REALTIME_VOICE=marin, with
   low reasoning effort in code. The OpenAI key needs Model capabilities → Request.
   See https://developers.openai.com/api/docs/guides/realtime-conversations.
-- app/realtime.py owns request admission and explicit input item references.
+- Match the LiveKit sample's common file roles: agent.py composes the session,
+  meeting_agent.py adapts framework behavior, and meeting_tools.py owns actions.
+  Keep Pipecat-specific transport and tool-registration code separate.
+- app/meeting_agent.py owns request admission and explicit input item references.
   Input transcription is only for address and listening-resume checks. Keep
   unrelated audio out of response context; do not restore a separate STT/LLM/TTS
   pipeline or automatically respond to every detected speech turn.
@@ -21,6 +24,8 @@ of the sibling LiveKit sample. The launcher has one meeting-URL input.
 - Join silently and post a short command introduction in chat. Give natural,
   useful answers: usually a few sentences, with more detail when needed. Do not
   impose a one-sentence limit.
+- Keep the introduction in agent.py with the same format as the LiveKit sample:
+  how to address the assistant, then a link to this README's "Try the agent" section.
 - Mute controls speech only. Tools keep working. Stop listening separately ignores
   requests except a standalone addressed start-listening command. Preserve mute
   across listening changes. Never replay skipped speech or requests.
