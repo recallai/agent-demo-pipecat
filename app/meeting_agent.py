@@ -25,7 +25,7 @@ class AdmittedResponseCreate(events.ResponseCreateEvent):
 class MeetingAgent(OpenAIRealtimeLLMService):
     def __init__(self, state: MeetingState,
                  resume_listening: Callable[[], Awaitable[str]] | None = None, **kwargs):
-        kwargs.setdefault("run_in_parallel", False)
+        kwargs.setdefault("run_in_parallel", False)  # Pipecat serializes meeting tools.
         super().__init__(**kwargs)
         self.state = state
         self.resume_listening = resume_listening
@@ -133,9 +133,6 @@ class MeetingAgent(OpenAIRealtimeLLMService):
             for position, timestamp in reversed(self._audio_times)
             if position <= event.audio_start_ms
         ), None)
-
-    async def _handle_evt_speech_stopped(self, event):
-        pass
 
     async def _discard_input(self, item_id: str):
         await self.send_client_event(events.ConversationItemDeleteEvent(item_id=item_id))
@@ -289,7 +286,6 @@ class MeetingAgent(OpenAIRealtimeLLMService):
             "conversation.item.input_audio_transcription.completed": self.handle_evt_input_audio_transcription_completed,
             "conversation.item.input_audio_transcription.failed": self._handle_failed_transcription,
             "input_audio_buffer.speech_started": self._handle_evt_speech_started,
-            "input_audio_buffer.speech_stopped": self._handle_evt_speech_stopped,
         }
         async for message in self._websocket:
             event = events.parse_server_event(message)

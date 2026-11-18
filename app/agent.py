@@ -66,7 +66,7 @@ async def run_agent(connection, bot_id: str) -> None:
     effort = realtime_reasoning_effort()
     transport = BrowserTransport(connection, TransportParams(
         audio_in_enabled=True, audio_out_enabled=True, video_out_enabled=True,
-        video_out_is_live=False, video_out_width=AVATAR_SIZE, video_out_height=AVATAR_SIZE,
+        video_out_width=AVATAR_SIZE, video_out_height=AVATAR_SIZE,
         video_out_framerate=15,
     ))
     speech = AudioGate(state)
