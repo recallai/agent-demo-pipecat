@@ -64,8 +64,10 @@ async def create_meeting_agent(request: MeetingRequest):
         ) as client:
             # Recall can send its WebRTC offer before create_bot returns its ID.
             session = sessions.create()
-            offer_url = f"{public_origin()}/sessions/{session.token}/api/offer"
-            bot_id = await client.create_bot(request.meeting_url, offer_url)
+            offer_url = f"{public_origin()}/api/offer"
+            bot_id = await client.create_bot(
+                request.meeting_url, offer_url, session_token=session.token,
+            )
             await sessions.bind_bot(session, bot_id)
         return {
             "bot_id": bot_id,

@@ -65,20 +65,8 @@ class MeetingAgent(OpenAIRealtimeLLMService):
         return (response_id is not None and self._can_respond()
                 and self._response_generations.get(response_id) == self.state.generation)
 
-    async def _handle_context(self, context, direction):
-        if self._context is None:
-            # Native initialization normally starts a reply. Bind tools silently.
-            self._context = context
-            self._llm_needs_conversation_setup = False
-            # Setup connected the socket already. Also cover context arriving
-            # between session.created's update and its acknowledgement.
-            await self._send_session_update()
-            if self._waiting_generation is not None:
-                await self._create_response()
-            return
-        await super()._handle_context(context, direction)
-
     async def _create_response(self):
+        # Let Pipecat initialize context and tools; only an admitted turn may reply.
         if self._can_respond():
             await super()._create_response()
 
@@ -110,6 +98,8 @@ class MeetingAgent(OpenAIRealtimeLLMService):
             event = AdmittedResponseCreate(
                 event_id=event.event_id, response=AdmittedResponse(**properties),
             )
+            # Only results included in this input snapshot have been consumed.
+            self._results_awaiting_response = False
             self._created_generations.append(self.state.generation)
             self._waiting_generation = None
         await super().send_client_event(event)
@@ -192,8 +182,9 @@ class MeetingAgent(OpenAIRealtimeLLMService):
         generation = self._created_generations.popleft() if self._created_generations else -1
         self._response_generations[event.response.id] = generation
         self._active_response_id = event.response.id
+        pending_results = self._results_awaiting_response
         await super()._handle_evt_response_created(event)
-        if self._waiting_generation == self.state.generation:
+        if pending_results or self._waiting_generation == self.state.generation:
             self._results_awaiting_response = True
 
     async def _handle_evt_response_done(self, event):

@@ -21,7 +21,7 @@ from app.meeting_agent import MeetingAgent
 from app.meeting_tools import MeetingState, MeetingTools
 from app.recall_client import RecallClient, RecallError
 from app.speech_output import AudioGate
-from app.tool_registration import register_meeting_tools
+from app.tool_registration import create_meeting_tool_schemas
 
 logger = logging.getLogger("meeting-demo")
 # Preserve the preset's native framing; a smaller canvas crops its face.
@@ -103,7 +103,7 @@ async def run_agent(connection: SmallWebRTCConnection, bot_id: str) -> None:
                 ),
             ),
         )
-        context = LLMContext(tools=register_meeting_tools(llm, tools, finished))
+        context = LLMContext(tools=create_meeting_tool_schemas(tools, finished))
         # Admission is controlled by our service, not automatic transcript turns.
         aggregators = LLMContextAggregatorPair(context, realtime_service_mode=False)
         avatar = SimliVideoService(

@@ -62,7 +62,7 @@ class RecallClient:
                         f"Recall could not confirm {action} (HTTP {response.status}). Check the meeting before trying again.",
                     )
                 if not 200 <= response.status < 300:
-                    hint = "Check the agent name and Recall workspace configuration."
+                    hint = "Check the request settings and Recall workspace configuration."
                     if response.status in (401, 403):
                         hint = "Check the Recall key, region, and workspace access."
                     elif response.status == 429:
@@ -83,7 +83,7 @@ class RecallClient:
     def _bot_path(bot_id: str, endpoint: str) -> str:
         return f"bot/{UUID(bot_id)}/{endpoint}/"
 
-    async def create_bot(self, meeting_url: str, offer_url: str) -> str:
+    async def create_bot(self, meeting_url: str, offer_url: str, *, session_token: str) -> str:
         result = await self._request(
             "POST", "bot/", "the meeting agent request",
             {
@@ -91,7 +91,13 @@ class RecallClient:
                 "bot_name": BOT_NAME,
                 "variant": {"google_meet": "web_4_core"},
                 "output_media": {
-                    "camera": {"kind": "pipecat", "config": {"url": offer_url}}
+                    "camera": {
+                        "kind": "pipecat",
+                        "config": {
+                            "url": offer_url,
+                            "body": {"session_token": session_token},
+                        },
+                    }
                 },
             },
             read_json=True,

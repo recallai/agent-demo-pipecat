@@ -126,15 +126,22 @@ sessions = MeetingSessions()
 media_app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
 
+class SessionData(BaseModel):
+    session_token: str = Field(min_length=43, max_length=43, pattern=r"^[A-Za-z0-9_-]+$")
+
+
 class OfferRequest(BaseModel):
     sdp: str = Field(min_length=1, max_length=1_048_576)
     type: Literal["offer"]
     pc_id: str | None = Field(default=None, max_length=256)
     restart_pc: bool = False
+    request_data: SessionData = Field(alias="requestData")
 
 
-@media_app.post("/sessions/{token}/api/offer")
-async def accept_offer(token: str, offer: OfferRequest):
+@media_app.post("/api/offer")
+async def accept_offer(offer: OfferRequest):
+    # Recall forwards config.body as requestData on each SmallWebRTC offer.
+    token = offer.request_data.session_token
     session = sessions.require(token)
     # Serialize initial offers and renegotiation so a session owns only one peer.
     async with session.offer_lock:

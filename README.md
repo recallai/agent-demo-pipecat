@@ -1,6 +1,6 @@
 # Pipecat meeting agent
 
-A small agent demo using Recall.ai's native `pipecat` integration and [Pipecat SmallWebRTC](https://docs.pipecat.ai/api-reference/server/services/transport/small-webrtc). It includes an interactive Simli avatar, native [OpenAI Realtime](https://developers.openai.com/api/docs/guides/realtime-conversations) speech-to-speech, and nine tool calls.
+A small agent demo using [Recall.ai's native Pipecat integration](https://docs.recall.ai/docs/meeting-agents-pipecat) and [Pipecat SmallWebRTC](https://docs.pipecat.ai/api-reference/server/services/transport/small-webrtc). It includes an interactive Simli avatar, native [OpenAI Realtime](https://developers.openai.com/api/docs/guides/realtime-conversations) speech-to-speech, and nine tool calls.
 
 ## Behavior
 
@@ -62,7 +62,7 @@ Fill in the root `.env`. It is ignored by Git and never sent to the browser. Exi
 | `SESSION_TIMEOUT_SECONDS` | Overall session limit; defaults to `600` seconds. |
 | `WEBRTC_ICE_SERVERS` | Optional STUN/TURN configuration; see [.env.example](.env.example). |
 
-Restart the app and launch a new bot after changing `.env`. No provider credentials need to be entered in the Recall dashboard.
+Restart the app and launch a new bot after changing `.env`. This sample authenticates offers with an expiring session token, so it needs no saved Pipecat credentials in Recall. Deployments using bearer authentication must register their token and exact offer URL in **Agents → Pipecat**, as described in the [integration guide](https://docs.recall.ai/docs/meeting-agents-pipecat#2-add-your-credentials-to-recallai).
 
 ### 3. Start an HTTPS tunnel
 
@@ -124,10 +124,12 @@ The session defaults to 10 minutes; launch another bot to repeat the demo.
 | `app/recall_client.py` | Recall HTTP requests and clear errors. |
 | `app/config.py` | Load and validate `.env`. |
 | `app/media_server.py` | Authenticated WebRTC offers, renegotiation, and session cleanup. |
-| `app/tool_registration.py` | Describe and register the nine Pipecat tools. |
+| `app/tool_registration.py` | Define the nine tools with their Pipecat handlers attached. |
 | `app/request_filter.py` | Recognize agent addresses and the standalone listening-resume command. |
 
-Recall runs a **four-core Google Meet bot** with `output_media.camera.kind = "pipecat"`. It connects directly to Pipecat over WebRTC. OpenAI Realtime generates speech and streams it into Simli, which supplies the speaking avatar. Five tools call Recall; four control speech and listening locally. Screen sharing still uses `kind: "webpage"` to display the requested URL.
+Recall runs a **four-core Google Meet bot** with one `output_media.camera.kind = "pipecat"` source for meeting audio and avatar video. The launcher passes an expiring session token in `config.body`; Recall forwards it as `requestData` to `/api/offer`. Audio and video connect directly over WebRTC.
+
+OpenAI Realtime streams speech into Simli, which supplies the speaking avatar. Pipecat initializes the conversation context and registers its tool handlers. Tools run on the server using the bot ID returned by Create Bot: five call Recall and four control speech and listening locally. Screen sharing uses `kind: "webpage"` to display the requested URL.
 
 Input transcription checks for addressed requests before they can trigger or interrupt an answer. Muting silences speech while leaving tools available. Stopping listening ignores requests until a standalone **“Assistant, start listening”** command; skipped requests are not replayed.
 
