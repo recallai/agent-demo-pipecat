@@ -15,7 +15,7 @@ from pipecat.transports.base_transport import TransportParams
 from pipecat.workers.runner import WorkerRunner
 
 from app.browser_transport import BrowserTransport
-from app.config import require_env, session_timeout
+from app.config import realtime_reasoning_effort, require_env, session_timeout
 from app.meeting_agent import MeetingAgent
 from app.meeting_tools import MeetingState, MeetingTools
 from app.recall_client import RecallClient, RecallError
@@ -37,12 +37,13 @@ usually a few sentences, with more explanation when the question needs it. Ask a
 brief clarification when a request is ambiguous. Avoid unsolicited advice and
 repeated offers of help. Understand natural phrasing rather than requiring command names.
 
-Use tools only for requested actions, without spoken filler or recaps. Each tool
-posts its own chat feedback. Do not duplicate that feedback. Starting a share
-does not authorize posting its link. When both are requested, wait for the share
-to succeed, then call send_current_page_link. Never repeat an action or retry an
+Use tools only for requested actions. Keep any spoken acknowledgment brief; wait
+for the tool result before claiming success. Each tool also posts chat feedback.
+Starting a share does not authorize posting its link. When both are requested,
+wait for the share to succeed, then call send_current_page_link.
+Never repeat an action or retry an
 uncertain or failed action. An in-progress tool is already running; do not call it
-again. After all explicitly requested actions finish, return no spoken text.
+again. After all requested actions finish, a short confirmation is enough.
 Report only what tools confirm. Never claim a page visibly loaded, read unseen
 page contents, or invent a URL. Ask for a URL if the intended page is unclear.
 
@@ -62,6 +63,7 @@ async def run_agent(connection, bot_id: str) -> None:
     finished = asyncio.Event()
     state = MeetingState()
     api_key = require_env("OPENAI_API_KEY")
+    effort = realtime_reasoning_effort()
     transport = BrowserTransport(connection, TransportParams(
         audio_in_enabled=True, audio_out_enabled=True, video_out_enabled=True,
         video_out_is_live=False, video_out_width=AVATAR_SIZE, video_out_height=AVATAR_SIZE,
@@ -85,7 +87,8 @@ async def run_agent(connection, bot_id: str) -> None:
             settings=MeetingAgent.Settings(
                 model=require_env("REALTIME_MODEL"), system_instruction=INSTRUCTIONS,
                 session_properties=events.SessionProperties(
-                    output_modalities=["audio"], reasoning=events.Reasoning(effort="low"),
+                    output_modalities=["audio"],
+                    reasoning=events.Reasoning(effort=effort) if effort else None,
                     audio=events.AudioConfiguration(
                         input=events.AudioInput(
                             transcription=events.InputAudioTranscription(

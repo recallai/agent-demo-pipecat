@@ -4,7 +4,7 @@ A small agent demo featuring [Recall.ai's Output Media API](https://docs.recall.
 
 ## Behavior
 
-Address the avatar as **“Assistant”** or **“pipecat demo”**, followed by a question or a command such as “show https://example.com.” The agent joins silently and posts an introduction in meeting chat. Each tool call posts its result in chat; requested messages and links are their own confirmation.
+Address the avatar as **“Assistant”** or **“pipecat demo”**, followed by a question or a command such as “show https://example.com.” The agent joins silently and posts an introduction in meeting chat. Answers stream as OpenAI generates them. Tool calls can include a brief spoken acknowledgment and also post their result in chat; requested messages and links are their own chat confirmation.
 
 | Action | Tool |
 | --- | --- |
@@ -24,7 +24,7 @@ Start each request with the agent's name. After stopping listening, say **“Ass
 
 - Python 3.12 and [uv](https://docs.astral.sh/uv/getting-started/installation/).
 - A Recall workspace and its regional REST API key.
-- An OpenAI project API key with **Model capabilities → Request** permission and access to `gpt-realtime-2.1` and `gpt-4o-mini-transcribe`. See [OpenAI permissions](https://developers.openai.com/api/docs/guides/rbac#permissions).
+- An OpenAI project API key with **Model capabilities → Request** permission and access to your selected Realtime model (the example uses `gpt-realtime-2.1`) and `gpt-4o-mini-transcribe`. See [OpenAI permissions](https://developers.openai.com/api/docs/guides/rbac#permissions).
 - A Simli API key and a face available to that account.
 - A public HTTPS tunnel to the local media server, with WebSocket support.
 - A Google account to host and admit the agent into Google Meet.
@@ -57,12 +57,23 @@ Fill in the root `.env`. It is ignored by Git and never sent to the browser. Exi
 | `RECALL_API_BASE_URL` | Matching regional API URL, such as `https://us-west-2.recall.ai/api/v1`. |
 | `OPENAI_API_KEY` | Project key with Model capabilities → Request access. |
 | `REALTIME_MODEL` | Native audio conversation model; the example uses `gpt-realtime-2.1`. |
+| `REALTIME_REASONING_EFFORT` | `low` by default. Use `minimal`, `low`, `medium`, `high`, or `xhigh` on a model that supports reasoning; `default` leaves the choice to the provider. |
 | `REALTIME_VOICE` | Realtime voice; the example uses `marin`. |
 | `SIMLI_API_KEY`, `SIMLI_FACE_ID` | Simli account key and avatar face ID. |
 | `PIPECAT_PUBLIC_URL` | The tunnel's HTTPS origin, without a path or trailing slash. |
 | `SESSION_TIMEOUT_SECONDS` | Overall session limit; defaults to `600` seconds. |
 
 OpenAI supplies the voice and Simli animates the avatar. Both keys stay on the Python server; this sample uses Recall's `webpage` Output Media integration and requires no provider credentials in the Recall dashboard.
+
+Tune the demo in `.env`, without changing Python code:
+
+```dotenv
+REALTIME_MODEL=gpt-realtime-2.1
+REALTIME_REASONING_EFFORT=low
+REALTIME_VOICE=marin
+```
+
+Choose an OpenAI Realtime model with native audio output and function calling. A text-only model cannot replace it. Lower reasoning effort favors responsiveness; higher effort allows more deliberation and may increase latency. Supported effort levels depend on the model. Restart the app and launch a new bot after changing these settings; an existing session keeps its original model.
 
 ### 3. Start an HTTPS tunnel
 
@@ -120,11 +131,11 @@ The avatar and meeting session have a duration limit; launch another bot to repe
 | `app/web.py` | Serve the form, create a Recall bot, and run both HTTP servers. |
 | `app/templates/index.html` | Single form and request status. |
 | `app/agent.py` | Instructions, Realtime configuration, avatar startup, and cleanup. |
-| `app/meeting_agent.py` | Adapt Pipecat's native Realtime service: admit requests, select context, and keep tool calls silent. |
+| `app/meeting_agent.py` | Admit addressed requests and select their native audio context; stream current Realtime replies and tool calls. |
 | `app/meeting_tools.py` | Nine tools, listening/mute state, the current page URL, and chat feedback. |
-| `app/speech_output.py` | Suppress muted, interrupted, and tool-confirmation audio. |
+| `app/speech_output.py` | Suppress muted and interrupted audio before and after the avatar. |
 | `app/recall_client.py` | Recall HTTP requests, regional URL validation, and clear errors. |
-| `app/config.py` | Load `.env` and define the fixed bot name. |
+| `app/config.py` | Load and validate `.env`, including model and reasoning settings. |
 | `app/media_server.py` | Expiring meeting URLs, authenticated media connections, and session cleanup. |
 | `app/browser_transport.py` | Adapt browser PCM audio and JPEG video to Pipecat frames. |
 | `app/tool_registration.py` | Describe and register the nine Pipecat tools. |
@@ -138,7 +149,11 @@ Recall runs an Output Media webpage in a **four-core Google Meet bot** (`variant
 
 Pipecat sends the original audio to OpenAI Realtime, which generates speech directly. Simli animates that speech. There is no separate STT → LLM → TTS pipeline. Input transcription checks only whether a request is addressed to the agent or is the standalone start-listening command; unrelated speech is excluded from response context and cannot interrupt an answer.
 
-To keep tool actions silent, spoken answers wait until the response finishes generating and contains no tool call. This adds playback delay. Muting drops speech while leaving tools available. Stopping listening discards requests except for an addressed standalone “start listening” command; skipped requests and unheard answers cannot replay when listening or speech resumes.
+The native Realtime service streams speech directly into Simli; the app does not buffer a whole response before playback. Pipecat's function-calling interface executes the tools and returns results to the model for a brief acknowledgment or another explicitly requested action. An in-progress Recall action survives a speech interruption and is not retried automatically.
+
+OpenAI's semantic turn detector identifies utterance boundaries. The app waits for the completed input transcript to recognize an addressed request before answering or interrupting; ordinary meeting discussion does neither. This meeting-specific check adds latency compared with an always-addressed, one-to-one voice assistant. Muting drops speech while leaving tools available. Stopping listening discards requests except for an addressed standalone “start listening” command; skipped requests and unheard answers cannot replay when listening or speech resumes.
+
+The browser media connection uses an authenticated WebSocket because the local HTTPS tunnel carries that traffic end to end. Pipecat [recommends WebRTC for browser voice applications](https://docs.pipecat.ai/client/concepts/choosing-a-transport); switching this sample to SmallWebRTC would also require reachable media ports or a TURN relay. The HTTPS tunnel alone only supplies WebRTC signaling.
 
 ## Boundaries and troubleshooting
 

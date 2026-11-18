@@ -7,7 +7,8 @@ of the sibling LiveKit sample. The launcher has one meeting-URL input.
 - Create Google Meet bots with variant.google_meet set to web_4_core.
 - Use Pipecat's native OpenAI Realtime service for audio input and speech output.
   The example uses REALTIME_MODEL=gpt-realtime-2.1 and REALTIME_VOICE=marin, with
-  low reasoning effort in code. The OpenAI key needs Model capabilities → Request.
+  REALTIME_REASONING_EFFORT=low. Keep the model and reasoning effort configurable
+  through .env. The OpenAI key needs Model capabilities → Request.
   See https://developers.openai.com/api/docs/guides/realtime-conversations.
 - Match the LiveKit sample's common file roles: agent.py composes the session,
   meeting_agent.py adapts framework behavior, and meeting_tools.py owns actions.
@@ -31,6 +32,9 @@ of the sibling LiveKit sample. The launcher has one meeting-URL input.
   across listening changes. Never replay skipped speech or requests.
 - Each tool posts chat feedback; requested messages and links are their own
   confirmation. A feedback failure must not repeat or undo an action.
+- Stream Realtime audio as it arrives. Brief tool acknowledgments are allowed;
+  never hold an entire answer to guarantee silent tools. Keep native Pipecat tool
+  handling and interruption truncation; preserve addressed-request admission.
 - Page sharing displays a public HTTPS URL; it does not read or control the page.
   Preserve the last accepted URL if a later request fails. Only explicitly
   requested actions are allowed after the startup introduction.

@@ -1,8 +1,7 @@
-"""Keep muted, interrupted, and tool-confirmation speech out of meeting audio."""
+"""Keep muted and interrupted speech out of meeting audio."""
 
 from pipecat.frames.frames import (
     Frame,
-    FunctionCallsStartedFrame,
     InterruptionFrame,
     LLMContextUserTurnFrame,
     OutputAudioRawFrame,
@@ -48,11 +47,6 @@ class AudioGate(FrameProcessor):
             self._request_generation = frame.metadata.get("request_generation")
             self._audio_generation = None
             self._blocked = False
-        elif isinstance(frame, FunctionCallsStartedFrame):
-            # The first gate clears Simli. The second has already received that
-            # interruption. Neither reopens for a tool's automatic continuation.
-            if not self._blocked:
-                await self.silence()
         elif isinstance(frame, InterruptionFrame):
             self._audio_generation = None
             self._blocked = True

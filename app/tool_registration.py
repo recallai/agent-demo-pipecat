@@ -62,8 +62,8 @@ def register_meeting_tools(llm, tools: MeetingTools, finished: asyncio.Event) ->
                 # Even an uncertain failure must never be retried automatically.
                 completed[key] = result
                 repeat = True
-            # Let the model perform a second explicitly requested action, such as
-            # sharing a page and then posting its link. Speech stays gated this turn.
+            # Let the model acknowledge a result or perform the next requested
+            # action. Controls end the turn so muted/paused speech cannot replay.
             continue_request = (
                 not repeat and params.function_name not in CONTROL_TOOLS
                 and generation == tools.state.generation

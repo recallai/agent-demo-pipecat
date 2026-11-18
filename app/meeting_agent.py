@@ -35,8 +35,6 @@ class MeetingAgent(OpenAIRealtimeLLMService):
         self._turn_used_tools = False
         self._waiting_generation: int | None = None
         self._response_generations: dict[str, int] = {}
-        self._response_audio: dict[str, list] = {}
-        self._tool_responses: set[str] = set()
         self._created_generations: deque[int] = deque()
         self._function_generations: dict[str, int] = {}
         self._active_response_id: str | None = None
@@ -57,11 +55,6 @@ class MeetingAgent(OpenAIRealtimeLLMService):
 
     def function_call_generation(self, call_id: str) -> int:
         return self._function_generations.get(call_id, -1)
-
-    def _has_async_tools(self) -> bool:
-        # In pinned Pipecat 1.16 this hook only adds generic spoken-result
-        # instructions. Our tools confirm in chat; their execution flags remain.
-        return False
 
     def _can_respond(self) -> bool:
         return (self._context is not None and self.state.is_listening
@@ -208,19 +201,7 @@ class MeetingAgent(OpenAIRealtimeLLMService):
 
     async def _handle_evt_response_done(self, event):
         response_id = event.response.id
-        audio = self._response_audio.pop(response_id, [])
-        has_tools = response_id in self._tool_responses or any(
-            item.type == "function_call" for item in event.response.output or []
-        )
-        self._tool_responses.discard(response_id)
         completed = event.response.status == "completed"
-        # Native models can speak a prelude before revealing a tool call. Hold
-        # voice until the complete response establishes that it is an answer.
-        if completed and not has_tools:
-            for delta in audio:
-                if not self._current_response(response_id) or self.state.is_muted:
-                    break
-                await super()._handle_evt_audio_delta(delta)
         if self._current_response(response_id) and completed:
             if (self.state.is_muted and not self._turn_used_tools
                     and self._current_input_id in self._admitted_items):
@@ -232,7 +213,7 @@ class MeetingAgent(OpenAIRealtimeLLMService):
                 if not self._current_response(response_id):
                     break
                 if item.type == "function_call" or (
-                    item.role == "assistant" and not has_tools and not self.state.is_muted
+                    item.role == "assistant" and not self.state.is_muted
                 ):
                     self._admitted_items[item.id] = None
         # Always settle the SDK's active/owed response bookkeeping, even if stale.
@@ -242,17 +223,16 @@ class MeetingAgent(OpenAIRealtimeLLMService):
             await self._create_response()
 
     async def _handle_evt_conversation_item_added(self, event):
-        if event.item.type == "function_call" and self._active_response_id is not None:
-            self._tool_responses.add(self._active_response_id)
-            self._response_audio.pop(self._active_response_id, None)
         if event.item.role == "assistant" and not self._current_response(self._active_response_id):
             return
         await super()._handle_evt_conversation_item_added(event)
 
     async def _handle_evt_audio_delta(self, event):
-        if (self._current_response(event.response_id) and not self.state.is_muted
-                and event.response_id not in self._tool_responses):
-            self._response_audio.setdefault(event.response_id, []).append(event)
+        if self._current_response(event.response_id) and not self.state.is_muted:
+            await super()._handle_evt_audio_delta(event)
+            # Keep streamed speech in context even if the next request interrupts
+            # it. Pipecat truncates this native audio item at the interruption.
+            self._admitted_items[event.item_id] = None
 
     async def _handle_evt_text_delta(self, event):
         if self._current_response(event.response_id):
@@ -263,8 +243,6 @@ class MeetingAgent(OpenAIRealtimeLLMService):
             await super()._handle_evt_audio_transcript_delta(event)
 
     async def _handle_evt_function_call_arguments_done(self, event):
-        self._tool_responses.add(event.response_id)
-        self._response_audio.pop(event.response_id, None)
         if not self._current_response(event.response_id):
             self._pending_function_calls.pop(event.call_id, None)
             return

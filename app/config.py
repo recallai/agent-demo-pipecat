@@ -34,9 +34,21 @@ def session_timeout() -> int:
     return seconds
 
 
+def realtime_reasoning_effort() -> str | None:
+    effort = os.getenv("REALTIME_REASONING_EFFORT", "low").strip().lower()
+    if effort == "default":
+        return None
+    if effort not in {"minimal", "low", "medium", "high", "xhigh"}:
+        raise ValueError(
+            "REALTIME_REASONING_EFFORT must be minimal, low, medium, high, xhigh, or default."
+        )
+    return effort
+
+
 def validate_agent_settings() -> None:
     for name in ("OPENAI_API_KEY", "SIMLI_API_KEY", "SIMLI_FACE_ID",
                  "REALTIME_MODEL", "REALTIME_VOICE"):
         require_env(name)
     public_origin()
     session_timeout()
+    realtime_reasoning_effort()
