@@ -4,7 +4,9 @@ import os
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from aiortc import RTCIceServer
 from dotenv import load_dotenv
+from pydantic import TypeAdapter
 
 ROOT = Path(__file__).resolve().parent.parent
 BOT_NAME = "pipecat demo"
@@ -45,6 +47,22 @@ def realtime_reasoning_effort() -> str | None:
     return effort
 
 
+def webrtc_ice_servers() -> list[RTCIceServer]:
+    value = os.getenv("WEBRTC_ICE_SERVERS", '[{"urls":"stun:stun.l.google.com:19302"}]')
+    try:
+        servers = TypeAdapter(list[RTCIceServer]).validate_json(value)
+        if not servers:
+            raise ValueError
+        for server in servers:
+            urls = [server.urls] if isinstance(server.urls, str) else server.urls
+            if not urls or any(not url.startswith(("stun:", "stuns:", "turn:", "turns:")) for url in urls):
+                raise ValueError
+        return servers
+    except ValueError:
+        # Validation errors can include TURN credentials; expose only the setting name.
+        raise ValueError("WEBRTC_ICE_SERVERS must be a nonempty JSON array of STUN/TURN servers.") from None
+
+
 def validate_agent_settings() -> None:
     for name in ("OPENAI_API_KEY", "SIMLI_API_KEY", "SIMLI_FACE_ID",
                  "REALTIME_MODEL", "REALTIME_VOICE"):
@@ -52,3 +70,4 @@ def validate_agent_settings() -> None:
     public_origin()
     session_timeout()
     realtime_reasoning_effort()
+    webrtc_ice_servers()

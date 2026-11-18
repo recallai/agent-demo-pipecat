@@ -12,9 +12,10 @@ from pipecat.processors.idle_frame_processor import IdleFrameProcessor
 from pipecat.services.openai.realtime import events
 from pipecat.services.simli.video import SimliVideoService
 from pipecat.transports.base_transport import TransportParams
+from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
+from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 from pipecat.workers.runner import WorkerRunner
 
-from app.browser_transport import BrowserTransport
 from app.config import realtime_reasoning_effort, require_env, session_timeout
 from app.meeting_agent import MeetingAgent
 from app.meeting_tools import MeetingState, MeetingTools
@@ -59,14 +60,16 @@ INTRO_CHAT_MESSAGE = (
 )
 
 
-async def run_agent(connection, bot_id: str) -> None:
+async def run_agent(connection: SmallWebRTCConnection, bot_id: str) -> None:
     finished = asyncio.Event()
     state = MeetingState()
     api_key = require_env("OPENAI_API_KEY")
     effort = realtime_reasoning_effort()
-    transport = BrowserTransport(connection, TransportParams(
+    transport = SmallWebRTCTransport(connection, TransportParams(
         audio_in_enabled=True, audio_out_enabled=True, video_out_enabled=True,
         video_out_width=AVATAR_SIZE, video_out_height=AVATAR_SIZE,
+        # Sample the latest avatar frame without buffering every generated frame.
+        video_out_is_live=False,
         video_out_framerate=15,
     ))
     speech = AudioGate(state)
@@ -119,9 +122,10 @@ async def run_agent(connection, bot_id: str) -> None:
             transport.output(),
             aggregators.assistant(),
         ])
+        # Native RTVI handles Recall's ready handshake and playback interruptions.
         worker = PipelineWorker(pipeline, params=PipelineParams(
             audio_in_sample_rate=16000, audio_out_sample_rate=24000,
-        ), idle_timeout_secs=None)
+        ), idle_timeout_secs=None, enable_rtvi=True)
 
         @transport.event_handler("on_client_connected")
         async def on_connected(_transport, _peer):

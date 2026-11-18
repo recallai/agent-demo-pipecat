@@ -33,7 +33,7 @@ class AudioGate(FrameProcessor):
         )
 
     async def silence(self) -> None:
-        """Clear avatar and browser output without cancelling a running tool."""
+        """Clear avatar and meeting output without cancelling a running tool."""
         self._audio_generation = None
         self._blocked = True
         await self.push_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)

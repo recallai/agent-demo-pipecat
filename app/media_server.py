@@ -1,16 +1,19 @@
-"""Serve each meeting's private media page and own its short-lived agent session."""
+"""Accept Recall's WebRTC offers and own each short-lived meeting session."""
 
 import asyncio
 import logging
 import secrets
 import time
 from dataclasses import dataclass, field
+from typing import Literal
 
-from fastapi import FastAPI, HTTPException, WebSocket
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from loguru import logger as sdk_logger
+from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
+from pydantic import BaseModel, Field
 
-from app.config import ROOT, require_env, session_timeout
+from app.config import require_env, session_timeout, webrtc_ice_servers
 from app.recall_client import RecallClient, RecallError
 
 logger = logging.getLogger("meeting-demo")
@@ -24,7 +27,8 @@ class MeetingSession:
     token: str
     expires_at: float
     bot_id: str | None = None
-    websocket: WebSocket | None = None
+    connection: SmallWebRTCConnection | None = None
+    offer_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     task: asyncio.Task | None = None
     expiry_task: asyncio.Task | None = None
     bot_ready: asyncio.Event = field(default_factory=asyncio.Event)
@@ -63,9 +67,11 @@ class MeetingSessions:
             await session.bot_ready.wait()
             if session.closed or session.bot_id is None:
                 return
+            if session.connection.pc.connectionState in {"closed", "failed"}:
+                raise RuntimeError("The meeting connection ended before startup.")
             from app.agent import run_agent
 
-            await run_agent(session.websocket, session.bot_id)
+            await run_agent(session.connection, session.bot_id)
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -100,13 +106,15 @@ class MeetingSessions:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-        if session.websocket is not None:
-            try:
-                await session.websocket.close()
-            except (RuntimeError, OSError):
-                pass  # The transport or remote page may have already closed it.
         if leave_bot and session.bot_id is not None:
             await self._leave_bot(session.bot_id)
+        try:
+            if session.connection is not None:
+                # A failed peer can stall during SDK teardown; do not keep the bot in the call.
+                async with asyncio.timeout(5):
+                    await session.connection.disconnect()
+        except Exception as error:
+            logger.warning("WebRTC cleanup failed (%s)", type(error).__name__)
 
     async def close_all(self) -> None:
         await asyncio.gather(
@@ -116,42 +124,60 @@ class MeetingSessions:
 
 sessions = MeetingSessions()
 media_app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
-PRIVATE_HEADERS = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
 
 
-@media_app.get("/media/{token}")
-async def meeting_page(token: str):
-    sessions.require(token)
-    return FileResponse(ROOT / "app/templates/renderer.html", headers=PRIVATE_HEADERS)
+class OfferRequest(BaseModel):
+    sdp: str = Field(min_length=1, max_length=1_048_576)
+    type: Literal["offer"]
+    pc_id: str | None = Field(default=None, max_length=256)
+    restart_pc: bool = False
 
 
-@media_app.get("/media/{token}/microphone.js")
-async def microphone_processor(token: str):
-    sessions.require(token)
-    return FileResponse(
-        ROOT / "app/templates/microphone.js", media_type="text/javascript", headers=PRIVATE_HEADERS,
-    )
+@media_app.post("/sessions/{token}/api/offer")
+async def accept_offer(token: str, offer: OfferRequest):
+    session = sessions.require(token)
+    # Serialize initial offers and renegotiation so a session owns only one peer.
+    async with session.offer_lock:
+        sessions.require(token)
+        if session.connection is not None:
+            if offer.pc_id != session.connection.pc_id:
+                raise HTTPException(409, "This meeting already has a connection.")
+        elif offer.pc_id is not None:
+            raise HTTPException(404, "This meeting connection is unavailable.")
 
+        try:
+            async with asyncio.timeout(30):
+                if session.connection is None:
+                    # Own the peer before ICE gathering so even cancelled setup can close it.
+                    session.connection = SmallWebRTCConnection(
+                        ice_servers=webrtc_ice_servers(),
+                    )
 
-@media_app.websocket("/media/{token}/stream")
-async def meeting_stream(websocket: WebSocket, token: str):
-    try:
-        session = sessions.require(token)
-    except HTTPException:
-        await websocket.close(code=1008)
-        return
-    if session.websocket is not None:
-        await websocket.close(code=1008)
-        return
-    # Claim before awaiting: one peer can consume each meeting session.
-    session.websocket = websocket
-    try:
-        await websocket.accept()
-        session.task = asyncio.create_task(sessions.run_agent(session))
-        await session.task
-    except asyncio.CancelledError:
-        if not session.closed:
+                    @session.connection.event_handler("closed")
+                    async def on_closed(_connection):
+                        if session.task is None or not session.bot_ready.is_set():
+                            await sessions.close(session, leave_bot=True)
+
+                    await session.connection.initialize(sdp=offer.sdp, type=offer.type)
+                    if not session.closed:
+                        session.task = asyncio.create_task(sessions.run_agent(session))
+                else:
+                    await session.connection.renegotiate(
+                        sdp=offer.sdp, type=offer.type, restart_pc=offer.restart_pc,
+                    )
+            # Expiry or shutdown can happen while ICE candidates are gathered.
+            if session.closed:
+                raise HTTPException(410, "This meeting session has ended.")
+            answer = session.connection.get_answer()
+            if answer is None:
+                raise RuntimeError("No WebRTC answer was produced.")
+            return JSONResponse(answer, headers={"Cache-Control": "no-store"})
+        except HTTPException:
+            raise
+        except asyncio.CancelledError:
             await sessions.close(session, leave_bot=True)
             raise
-    except Exception:
-        await sessions.close(session, leave_bot=True)
+        except Exception as error:
+            logger.warning("WebRTC setup failed (%s)", type(error).__name__)
+            await sessions.close(session, leave_bot=True)
+            raise HTTPException(502, "Could not establish the meeting connection.") from None

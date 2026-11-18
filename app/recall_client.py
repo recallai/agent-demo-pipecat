@@ -83,7 +83,7 @@ class RecallClient:
     def _bot_path(bot_id: str, endpoint: str) -> str:
         return f"bot/{UUID(bot_id)}/{endpoint}/"
 
-    async def create_bot(self, meeting_url: str, media_url: str) -> str:
+    async def create_bot(self, meeting_url: str, offer_url: str) -> str:
         result = await self._request(
             "POST", "bot/", "the meeting agent request",
             {
@@ -91,7 +91,7 @@ class RecallClient:
                 "bot_name": BOT_NAME,
                 "variant": {"google_meet": "web_4_core"},
                 "output_media": {
-                    "camera": {"kind": "webpage", "config": {"url": media_url}}
+                    "camera": {"kind": "pipecat", "config": {"url": offer_url}}
                 },
             },
             read_json=True,

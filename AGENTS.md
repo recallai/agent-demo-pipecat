@@ -4,6 +4,9 @@ Keep this a small Pipecat and Recall Google Meet demo, matching the final behavi
 of the sibling LiveKit sample. The launcher has one meeting-URL input.
 
 - Keep the Simli speaking avatar and HTTPS tunnel.
+- Use Recall camera kind pipecat with Pipecat's native SmallWebRTCTransport.
+  The tunnel carries signaling; audio/video travel over WebRTC. Keep the native
+  RTVI handshake and interruption messages; do not restore a browser media bridge.
 - Create Google Meet bots with variant.google_meet set to web_4_core.
 - Use Pipecat's native OpenAI Realtime service for audio input and speech output.
   The example uses REALTIME_MODEL=gpt-realtime-2.1 and REALTIME_VOICE=marin, with
@@ -48,6 +51,9 @@ of the sibling LiveKit sample. The launcher has one meeting-URL input.
   Do not substitute credentials from another project or workspace.
 - Do not add evaluator code, test harnesses, verification instrumentation, or
   reports to this repository. Run checks externally and report their limits.
-- Keep the launcher local. Public media routes must require a short-lived session token
-  and be limited to the meeting page, microphone processor, and media stream.
+- Keep the launcher local. Public signaling must require a short-lived session
+  token and be limited to the session's POST offer endpoint. Each session owns
+  one peer, including while ICE setup is pending. Support native renegotiation.
+- Default to STUN for local development; allow TURN through WEBRTC_ICE_SERVERS.
+  An HTTPS tunnel alone does not relay WebRTC media through restrictive networks.
 - Report local checks separately from observed live meeting behavior.
