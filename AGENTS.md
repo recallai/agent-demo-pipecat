@@ -4,6 +4,9 @@ Keep this a small Pipecat and Recall Google Meet demo, matching the final behavi
 of the sibling LiveKit sample. The launcher has one meeting-URL input.
 
 - Keep the Simli speaking avatar and HTTPS tunnel.
+- Use Recall camera kind pipecat with Pipecat's native SmallWebRTCTransport.
+  The tunnel carries signaling; audio/video travel over WebRTC. Keep the native
+  RTVI handshake and interruption messages; do not restore a browser media bridge.
 - Create Google Meet bots with variant.google_meet set to web_4_core.
 - Use Pipecat's native OpenAI Realtime service for audio input and speech output.
   The example uses REALTIME_MODEL=gpt-realtime-2.1 and REALTIME_VOICE=marin, with
@@ -13,6 +16,8 @@ of the sibling LiveKit sample. The launcher has one meeting-URL input.
 - Match the LiveKit sample's common file roles: agent.py composes the session,
   meeting_agent.py adapts framework behavior, and meeting_tools.py owns actions.
   Keep Pipecat-specific transport and tool-registration code separate.
+- Let Pipecat initialize context and register handlers attached to FunctionSchema.
+  Preserve the admission guard that prevents an automatic startup reply.
 - app/meeting_agent.py owns request admission and explicit input item references.
   Input transcription is only for address and listening-resume checks. Keep
   unrelated audio out of response context; do not restore a separate STT/LLM/TTS
@@ -40,6 +45,9 @@ of the sibling LiveKit sample. The launcher has one meeting-URL input.
   requested actions are allowed after the startup introduction.
 - Keep responsibilities and names clear. Review files approaching 300 lines.
   Avoid speculative abstractions and extra features.
+- Follow https://docs.recall.ai/docs/meeting-agents-pipecat. Pass the short-lived
+  session token in config.body; Recall forwards it as requestData to /api/offer.
+  Keep the bot ID returned by Create Bot on the server for tool calls.
 - Use Recall MCP docs to verify API behavior. Record documentation gaps for new
   integration fields and verify their source implementation before using them.
 - Keep credentials in the ignored root .env or process environment. Never print
@@ -48,6 +56,9 @@ of the sibling LiveKit sample. The launcher has one meeting-URL input.
   Do not substitute credentials from another project or workspace.
 - Do not add evaluator code, test harnesses, verification instrumentation, or
   reports to this repository. Run checks externally and report their limits.
-- Keep the launcher local. Public media routes must require a short-lived session token
-  and be limited to the meeting page, microphone processor, and media stream.
+- Keep the launcher local. Public signaling must require a short-lived session
+  token and be limited to POST /api/offer. Each session owns
+  one peer, including while ICE setup is pending. Support native renegotiation.
+- Default to STUN for local development; allow TURN through WEBRTC_ICE_SERVERS.
+  An HTTPS tunnel alone does not relay WebRTC media through restrictive networks.
 - Report local checks separately from observed live meeting behavior.

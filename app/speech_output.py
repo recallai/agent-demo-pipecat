@@ -21,21 +21,19 @@ class AudioGate(FrameProcessor):
         self._state = state
         self._request_generation: int | None = None
         self._audio_generation: int | None = None
-        self._blocked = True
 
     def _can_speak(self) -> bool:
         return (
-            not self._blocked
-            and self._request_generation == self._state.generation
+            self._request_generation == self._state.generation
             and not self._state.is_muted
             and self._state.is_listening
             and not self._state.is_leaving
         )
 
     async def silence(self) -> None:
-        """Clear avatar and browser output without cancelling a running tool."""
+        """Clear avatar and meeting output without cancelling a running tool."""
+        self._request_generation = None
         self._audio_generation = None
-        self._blocked = True
         await self.push_frame(InterruptionFrame(), FrameDirection.DOWNSTREAM)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -46,10 +44,9 @@ class AudioGate(FrameProcessor):
         if isinstance(frame, LLMContextUserTurnFrame):
             self._request_generation = frame.metadata.get("request_generation")
             self._audio_generation = None
-            self._blocked = False
         elif isinstance(frame, InterruptionFrame):
+            self._request_generation = None
             self._audio_generation = None
-            self._blocked = True
         elif isinstance(frame, TTSStartedFrame):
             self._audio_generation = self._request_generation if self._can_speak() else None
         elif isinstance(frame, OutputAudioRawFrame):

@@ -62,10 +62,12 @@ async def create_meeting_agent(request: MeetingRequest):
         async with RecallClient(
             require_env("RECALL_API_KEY"), require_env("RECALL_API_BASE_URL"),
         ) as client:
-            # The media page can connect before create_bot returns its bot ID.
+            # Recall can send its WebRTC offer before create_bot returns its ID.
             session = sessions.create()
-            media_url = f"{public_origin()}/media/{session.token}"
-            bot_id = await client.create_bot(request.meeting_url, media_url)
+            offer_url = f"{public_origin()}/api/offer"
+            bot_id = await client.create_bot(
+                request.meeting_url, offer_url, session_token=session.token,
+            )
             await sessions.bind_bot(session, bot_id)
         return {
             "bot_id": bot_id,
@@ -99,7 +101,7 @@ async def serve() -> None:
         LocalServer(uvicorn.Config(app, host="127.0.0.1", port=8001, access_log=False)),
         LocalServer(uvicorn.Config(
             media_app, host="127.0.0.1", port=7861, access_log=False,
-            log_level="warning", ws_max_size=64_000, ws_max_queue=4,
+            log_level="warning",
         )),
     ]
     loop = asyncio.get_running_loop()

@@ -1,11 +1,11 @@
-"""Describe the nine meeting tools and register their Pipecat handlers."""
+"""Describe the nine meeting tools with their Pipecat handler attached."""
 
 import asyncio
 import json
 
+from pipecat.adapters.llm.schemas.direct_function import tool_options
 from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
-from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
-from pipecat.frames.frames import FunctionCallResultProperties
+from pipecat.frames.frames import FunctionCallResultProperties, LLMRunFrame
 from pipecat.services.llm_service import FunctionCallParams
 
 from app.meeting_tools import MeetingTools, ToolError
@@ -28,15 +28,16 @@ TOOL_SCHEMAS = [
 CONTROL_TOOLS = {"mute_agent", "unmute_agent", "stop_listening", "start_listening", "leave_call"}
 
 
-def register_meeting_tools(llm, tools: MeetingTools, finished: asyncio.Event) -> ToolsSchema:
+def create_meeting_tool_schemas(tools: MeetingTools, finished: asyncio.Event) -> list[FunctionSchema]:
     completed: dict[tuple[int, str, str], str] = {}
-    actions = {schema.name: getattr(tools, schema.name) for schema in TOOL_SCHEMAS}
     schemas = {schema.name: schema for schema in TOOL_SCHEMAS}
 
+    # An interruption must not abandon a Recall request already in flight.
+    @tool_options(cancel_on_interruption=False, timeout_secs=90)
     async def execute(params: FunctionCallParams):
         # The realtime service binds the call to the response that produced it.
         # Reading the current generation here could authorize a delayed old call.
-        generation = llm.function_call_generation(params.tool_call_id)
+        generation = params.llm.function_call_generation(params.tool_call_id)
         repeat = False
         key = (generation, params.function_name, json.dumps(dict(params.arguments), sort_keys=True))
         try:
@@ -53,7 +54,7 @@ def register_meeting_tools(llm, tools: MeetingTools, finished: asyncio.Event) ->
                 # Reserve before sending: cancellation cannot make an uncertain
                 # external action eligible for another automatic attempt.
                 completed[key] = "Action already attempted; result unconfirmed. Do not retry."
-                result = await actions[params.function_name](**params.arguments)
+                result = await getattr(tools, schema.name)(**params.arguments)
                 completed[key] = result
         except ToolError as error:
             result = str(error)
@@ -66,13 +67,24 @@ def register_meeting_tools(llm, tools: MeetingTools, finished: asyncio.Event) ->
             not repeat and params.function_name not in CONTROL_TOOLS
             and generation == tools.state.generation
         )
+
+        async def resume_request():
+            if (generation == tools.state.generation and tools.state.is_listening
+                    and not tools.state.is_leaving):
+                await params.llm.push_frame(LLMRunFrame())
+
+        # Pipecat 1.16 can lose a deferred tool continuation when speech ends.
+        # Request it explicitly after the result has reached the context.
         await params.result_callback(
-            result, properties=FunctionCallResultProperties(run_llm=continue_request),
+            result, properties=FunctionCallResultProperties(
+                run_llm=False, on_context_updated=resume_request if continue_request else None,
+            ),
         )
         if tools.state.is_leaving:
             finished.set()
 
-    for schema in TOOL_SCHEMAS:
-        # An interruption must not abandon a Recall request already in flight.
-        llm.register_function(schema.name, execute, cancel_on_interruption=False, timeout_secs=90)
-    return ToolsSchema(standard_tools=TOOL_SCHEMAS)
+    # LLMContext registers attached handlers automatically. Each meeting gets
+    # its own handler and completed-call state; the definitions stay reusable.
+    return [FunctionSchema(
+        schema.name, schema.description, schema.properties, schema.required, handler=execute,
+    ) for schema in TOOL_SCHEMAS]
