@@ -6,6 +6,8 @@ A small agent demo using [Recall.ai's native Pipecat integration](https://docs.r
 
 Address the avatar as **“Assistant”** or **“pipecat demo”**, followed by a question or command. The agent joins silently and posts an introduction in chat. Tool calls post their results in chat and may include a brief spoken acknowledgment.
 
+The launcher shows finalized meeting utterances from Deepgram Nova-3 as the meeting runs.
+
 | Action | Tool |
 | --- | --- |
 | Start or replace a screen share with a public webpage | `start_screenshare(url)` |
@@ -22,6 +24,7 @@ Address the avatar as **“Assistant”** or **“pipecat demo”**, followed by
 
 - Python 3.12 and [uv](https://docs.astral.sh/uv/getting-started/installation/).
 - A Recall workspace and its regional REST API key.
+- [Deepgram credentials configured in that Recall workspace](https://docs.recall.ai/docs/deepgram#setup).
 - An OpenAI project API key with **Model capabilities → Request** access to Realtime and `gpt-4o-mini-transcribe`.
 - A Simli API key and a face available to that account.
 - An HTTPS tunnel, such as cloudflared, and a network that permits WebRTC connections.
@@ -74,7 +77,7 @@ cloudflared tunnel --url http://127.0.0.1:7861
 
 Copy the tunnel's HTTPS origin into `PIPECAT_PUBLIC_URL` in `.env`. Keep this terminal running.
 
-Only tunnel the signaling server on port **7861**. Keep the launcher on port **8001** local. Audio and video travel over WebRTC, separately from the tunnel.
+Tunnel port **7861** for WebRTC signaling and transcript webhooks. Keep the launcher on port **8001** local. Audio and video travel over WebRTC, separately from the tunnel.
 
 ### 4. Start the app
 
@@ -116,20 +119,22 @@ The session defaults to 10 minutes; launch another bot to repeat the demo.
 | File | Responsibility |
 | --- | --- |
 | `app/web.py` | Serve the form, create a Recall bot, and run both HTTP servers. |
-| `app/templates/index.html` | Local meeting launcher form. |
+| `app/templates/index.html` | Local launcher and live transcript. |
 | `app/agent.py` | Instructions, Realtime configuration, avatar startup, and cleanup. |
 | `app/meeting_agent.py` | Admit addressed requests and stream Realtime replies. |
 | `app/meeting_tools.py` | Nine tools, listening/mute state, and the current page URL. |
 | `app/speech_output.py` | Suppress muted and interrupted audio before and after the avatar. |
 | `app/recall_client.py` | Recall HTTP requests and clear errors. |
 | `app/config.py` | Load and validate `.env`. |
-| `app/media_server.py` | Authenticated WebRTC offers, renegotiation, and session cleanup. |
+| `app/media_server.py` | WebRTC offers, transcript delivery, and session cleanup. |
 | `app/tool_registration.py` | Define the nine tools with their Pipecat handlers attached. |
 | `app/request_filter.py` | Recognize agent addresses and the standalone listening-resume command. |
 
 Recall runs a **four-core Google Meet bot** with one `output_media.camera.kind = "pipecat"` source for meeting audio and avatar video. The launcher passes an expiring session token in `config.body`; Recall forwards it as `requestData` to `/api/offer`. Audio and video connect directly over WebRTC.
 
 OpenAI Realtime streams speech into Simli, which supplies the speaking avatar. Pipecat initializes the conversation context and registers its tool handlers. Tools run on the server using the bot ID returned by Create Bot: five call Recall and four control speech and listening locally. Screen sharing uses `kind: "webpage"` to display the requested URL.
+
+The same Create Bot request configures Recall to send `transcript.data` webhooks to a URL with the expiring session token. The launcher polls for the latest 200 finalized utterances for its bot. The app keeps those utterances in memory until the session ends.
 
 Input transcription checks for addressed requests before they can trigger or interrupt an answer. Muting silences speech while leaving tools available. Stopping listening ignores requests until a standalone **“Assistant, start listening”** command; skipped requests are not replayed.
 

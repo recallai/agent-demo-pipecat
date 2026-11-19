@@ -83,13 +83,23 @@ class RecallClient:
     def _bot_path(bot_id: str, endpoint: str) -> str:
         return f"bot/{UUID(bot_id)}/{endpoint}/"
 
-    async def create_bot(self, meeting_url: str, offer_url: str, *, session_token: str) -> str:
+    async def create_bot(
+        self, meeting_url: str, offer_url: str, *, session_token: str, transcript_url: str,
+    ) -> str:
         result = await self._request(
             "POST", "bot/", "the meeting agent request",
             {
                 "meeting_url": meeting_url,
                 "bot_name": BOT_NAME,
                 "variant": {"google_meet": "web_4_core"},
+                "recording_config": {
+                    "transcript": {"provider": {"deepgram_streaming": {"model": "nova-3"}}},
+                    "realtime_endpoints": [{
+                        "type": "webhook",
+                        "url": transcript_url,
+                        "events": ["transcript.data"],
+                    }],
+                },
                 "output_media": {
                     "camera": {
                         "kind": "pipecat",

@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, field_validator
 
 from app.config import ROOT, public_origin, require_env, validate_agent_settings
@@ -51,6 +51,14 @@ async def index():
     return FileResponse(ROOT / "app" / "templates" / "index.html")
 
 
+@app.get("/api/bots/{bot_id}/transcript")
+async def live_transcript(bot_id: str):
+    session = sessions.for_bot(bot_id)
+    if session is None:
+        raise HTTPException(404, "This meeting session has ended or is unavailable.")
+    return JSONResponse(list(session.utterances), headers={"Cache-Control": "no-store"})
+
+
 @app.post("/api/bots", status_code=201)
 async def create_meeting_agent(request: MeetingRequest):
     if request.meeting_url in pending_meetings:
@@ -64,9 +72,10 @@ async def create_meeting_agent(request: MeetingRequest):
         ) as client:
             # Recall can send its WebRTC offer before create_bot returns its ID.
             session = sessions.create()
-            offer_url = f"{public_origin()}/api/offer"
+            origin = public_origin()
             bot_id = await client.create_bot(
-                request.meeting_url, offer_url, session_token=session.token,
+                request.meeting_url, f"{origin}/api/offer", session_token=session.token,
+                transcript_url=f"{origin}/api/transcript/?token={session.token}",
             )
             await sessions.bind_bot(session, bot_id)
         return {

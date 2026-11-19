@@ -1,17 +1,19 @@
-"""Accept Recall's WebRTC offers and own each short-lived meeting session."""
+"""Receive Recall's WebRTC offers and transcripts for short-lived meetings."""
 
 import asyncio
+import hashlib
 import logging
 import secrets
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, Response
 from loguru import logger as sdk_logger
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
-from pydantic import BaseModel, Field
+from pydantic import AliasPath, BaseModel, Field, ValidationError
 
 from app.config import require_env, session_timeout, webrtc_ice_servers
 from app.recall_client import RecallClient, RecallError
@@ -32,6 +34,7 @@ class MeetingSession:
     task: asyncio.Task | None = None
     expiry_task: asyncio.Task | None = None
     bot_ready: asyncio.Event = field(default_factory=asyncio.Event)
+    utterances: deque[dict[str, str]] = field(default_factory=lambda: deque(maxlen=200))
     closed: bool = False
 
 
@@ -53,6 +56,9 @@ class MeetingSessions:
         if session is None or session.closed or time.monotonic() >= session.expires_at:
             raise HTTPException(404, "This meeting session is unavailable or expired.")
         return session
+
+    def for_bot(self, bot_id: str) -> MeetingSession | None:
+        return next((session for session in self.entries.values() if session.bot_id == bot_id), None)
 
     async def bind_bot(self, session: MeetingSession, bot_id: str) -> None:
         session.bot_id = bot_id
@@ -124,6 +130,46 @@ class MeetingSessions:
 
 sessions = MeetingSessions()
 media_app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+
+
+class TranscriptWord(BaseModel):
+    text: str
+
+
+class TranscriptEvent(BaseModel):
+    event: Literal["transcript.data"]
+    bot_id: str = Field(validation_alias=AliasPath("data", "bot", "id"))
+    speaker: str | None = Field(
+        default=None, validation_alias=AliasPath("data", "data", "participant", "name"),
+    )
+    words: list[TranscriptWord] = Field(validation_alias=AliasPath("data", "data", "words"))
+
+
+@media_app.post("/api/transcript/", status_code=204)
+async def receive_transcript(request: Request, token: str = "") -> Response:
+    session = sessions.require(token)
+    # Recall may deliver an utterance before Create Bot returns its ID.
+    if session.bot_id is None:
+        raise HTTPException(503, "Waiting for the bot ID.")
+
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > 256 * 1024:
+            raise HTTPException(413, "Transcript event is too large.")
+    try:
+        event = TranscriptEvent.model_validate_json(body)
+    except ValidationError:
+        raise HTTPException(400, "Invalid transcript event.") from None
+
+    if session.closed or event.bot_id != session.bot_id:
+        return Response(status_code=204)
+
+    event_id = hashlib.sha256(body).hexdigest()
+    text = " ".join(word.text for word in event.words).strip()
+    if text and not any(row["id"] == event_id for row in session.utterances):
+        session.utterances.append({"id": event_id, "speaker": event.speaker or "", "text": text})
+    return Response(status_code=204)
 
 
 class SessionData(BaseModel):

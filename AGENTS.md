@@ -51,14 +51,15 @@ of the sibling LiveKit sample. The launcher has one meeting-URL input.
 - Use Recall MCP docs to verify API behavior. Record documentation gaps for new
   integration fields and verify their source implementation before using them.
 - Keep credentials in the ignored root .env or process environment. Never print
-  secrets or commit them. Do not store meeting content or recordings.
+  secrets or commit them. Keep only the recent launcher utterances in memory
+  during the session. Do not persist meeting content or recordings.
 - Use the credentials supplied for this sample and the matching Recall region.
   Do not substitute credentials from another project or workspace.
 - Do not add evaluator code, test harnesses, verification instrumentation, or
   reports to this repository. Run checks externally and report their limits.
-- Keep the launcher local. Public signaling must require a short-lived session
-  token and be limited to POST /api/offer. Each session owns
-  one peer, including while ICE setup is pending. Support native renegotiation.
+- Keep the launcher local. Require the short-lived session token for public
+  POST /api/offer and POST /api/transcript/.
+  Each session owns one peer, including during ICE setup. Support native renegotiation.
 - Default to STUN for local development; allow TURN through WEBRTC_ICE_SERVERS.
   An HTTPS tunnel alone does not relay WebRTC media through restrictive networks.
 - Report local checks separately from observed live meeting behavior.
