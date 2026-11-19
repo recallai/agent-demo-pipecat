@@ -1,14 +1,15 @@
 [project]
 name = "pipecat-meeting-agent"
 version = "0.1.0"
-description = "A small Pipecat voice agent with Recall meeting tools."
+description = "A Deepgram Voice Agent with Pipecat, Simli, and Recall meeting tools."
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "aiohttp>=3.12,<4",
     "fastapi>=0.115,<1",
-    "pipecat-ai[openai,simli,webrtc-video]==1.16.0",
+    "pipecat-ai[deepgram,simli,webrtc-video]==1.16.0",
     "python-dotenv>=1.0,<2",
     "uvicorn>=0.34,<1",
+    "websockets>=15,<18",
 ]
 
 [tool.uv]

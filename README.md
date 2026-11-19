@@ -1,6 +1,6 @@
 # Pipecat meeting agent
 
-A small agent demo using [Recall.ai's native Pipecat integration](https://docs.recall.ai/docs/meeting-agents-pipecat) and [Pipecat SmallWebRTC](https://docs.pipecat.ai/api-reference/server/services/transport/small-webrtc). It includes an interactive Simli avatar, native [OpenAI Realtime](https://developers.openai.com/api/docs/guides/realtime-conversations) speech-to-speech, and nine tool calls.
+A small agent demo using [Recall.ai's native Pipecat integration](https://docs.recall.ai/docs/meeting-agents-pipecat) and the [full Deepgram Voice Agent API](https://developers.deepgram.com/reference/voice-agent/voice-agent). It includes a lip-synced Simli avatar and nine meeting tools.
 
 ## Behavior
 
@@ -22,7 +22,7 @@ Address the avatar as **“Assistant”** or **“pipecat demo”**, followed by
 
 - Python 3.12 and [uv](https://docs.astral.sh/uv/getting-started/installation/).
 - A Recall workspace and its regional REST API key.
-- An OpenAI project API key with **Model capabilities → Request** access to Realtime and `gpt-4o-mini-transcribe`.
+- A [Deepgram project API key](https://developers.deepgram.com/docs/create-additional-api-keys) with access to streaming Flux STT and Voice Agent.
 - A Simli API key and a face available to that account.
 - An HTTPS tunnel, such as cloudflared, and a network that permits WebRTC connections.
 - A Google account to host the meeting.
@@ -53,10 +53,8 @@ Fill in the root `.env`. It is ignored by Git and never sent to the browser. Exi
 | --- | --- |
 | `RECALL_API_KEY` | REST API key for the Recall workspace. |
 | `RECALL_API_BASE_URL` | Matching regional API URL, such as `https://us-west-2.recall.ai/api/v1`. |
-| `OPENAI_API_KEY` | OpenAI project key. |
-| `REALTIME_MODEL` | Realtime model with native audio and tool calling; the example uses `gpt-realtime-2.1`. |
-| `REALTIME_REASONING_EFFORT` | `low` in the example; see [.env.example](.env.example) for options. |
-| `REALTIME_VOICE` | Realtime voice; the example uses `marin`. |
+| `DEEPGRAM_API_KEY` | Project key for Flux STT and Voice Agent. |
+| `DEEPGRAM_AGENT_MODEL`, `DEEPGRAM_AGENT_VOICE` | Hosted model and voice for Voice Agent. The example uses `gpt-4o-mini` and `aura-2-thalia-en`. |
 | `SIMLI_API_KEY`, `SIMLI_FACE_ID` | Simli account key and avatar face ID. |
 | `PIPECAT_PUBLIC_URL` | The tunnel's HTTPS origin, without a path or trailing slash. |
 | `SESSION_TIMEOUT_SECONDS` | Overall session limit; defaults to `600` seconds. |
@@ -117,21 +115,23 @@ The session defaults to 10 minutes; launch another bot to repeat the demo.
 | --- | --- |
 | `app/web.py` | Serve the form, create a Recall bot, and run both HTTP servers. |
 | `app/templates/index.html` | Local meeting launcher form. |
-| `app/agent.py` | Instructions, Realtime configuration, avatar startup, and cleanup. |
-| `app/meeting_agent.py` | Admit addressed requests and stream Realtime replies. |
+| `app/agent.py` | Instructions, Voice Agent settings, avatar startup, and cleanup. |
+| `app/addressed_audio.py` | Match finalized Flux turns to bounded PCM and admit addressed requests. |
+| `app/meeting_agent.py` | Voice Agent turn lifecycle, speech frames, and conversation history. |
+| `app/voice_agent_connection.py` | Deepgram WebSocket handshake, audio, and events. |
 | `app/meeting_tools.py` | Nine tools, listening/mute state, and the current page URL. |
 | `app/speech_output.py` | Suppress muted and interrupted audio before and after the avatar. |
 | `app/recall_client.py` | Recall HTTP requests and clear errors. |
 | `app/config.py` | Load and validate `.env`. |
 | `app/media_server.py` | Authenticated WebRTC offers, renegotiation, and session cleanup. |
-| `app/tool_registration.py` | Define the nine tools with their Pipecat handlers attached. |
+| `app/tool_registration.py` | Define and authorize Deepgram client-side function calls. |
 | `app/request_filter.py` | Recognize agent addresses and the standalone listening-resume command. |
 
 Recall runs a **four-core Google Meet bot** with one `output_media.camera.kind = "pipecat"` source for meeting audio and avatar video. The launcher passes an expiring session token in `config.body`; Recall forwards it as `requestData` to `/api/offer`. Audio and video connect directly over WebRTC.
 
-OpenAI Realtime streams speech into Simli, which supplies the speaking avatar. Pipecat initializes the conversation context and registers its tool handlers. Tools run on the server using the bot ID returned by Create Bot: five call Recall and four control speech and listening locally. Screen sharing uses `kind: "webpage"` to display the requested URL.
+Pipecat uses Flux STT to identify addressed requests and sends the approved audio to Deepgram Voice Agent. Deepgram runs speech recognition, the hosted text model, and speech synthesis. Pipecat streams the reply through Simli for synchronized audio and video. Each admitted request opens a new Voice Agent connection to isolate interrupted audio and tool calls, and the app carries a bounded conversation history forward.
 
-Input transcription checks for addressed requests before they can trigger or interrupt an answer. Muting silences speech while leaving tools available. Stopping listening ignores requests until a standalone **“Assistant, start listening”** command; skipped requests are not replayed.
+Client-side tools run on our server using the bot ID returned by Create Bot. Five call Recall and four control speech and listening locally. Muting silences speech while leaving tools available. Stopping listening ignores requests until a standalone **“Assistant, start listening”** command. As the agent hears mixed meeting audio, overlapping voices can be present inside an admitted request.
 
 ## Boundaries and troubleshooting
 

@@ -8,20 +8,17 @@ of the sibling LiveKit sample. The launcher has one meeting-URL input.
   The tunnel carries signaling; audio/video travel over WebRTC. Keep the native
   RTVI handshake and interruption messages; do not restore a browser media bridge.
 - Create Google Meet bots with variant.google_meet set to web_4_core.
-- Use Pipecat's native OpenAI Realtime service for audio input and speech output.
-  The example uses REALTIME_MODEL=gpt-realtime-2.1 and REALTIME_VOICE=marin, with
-  REALTIME_REASONING_EFFORT=low. Keep the model and reasoning effort configurable
-  through .env. The OpenAI key needs Model capabilities → Request.
-  See https://developers.openai.com/api/docs/guides/realtime-conversations.
+- Use the full Deepgram Voice Agent WebSocket for admitted audio, hosted model
+  reasoning and tool calls, and streamed speech. Keep the model and voice
+  configurable through .env. See https://developers.deepgram.com/reference/voice-agent/voice-agent.
 - Match the LiveKit sample's common file roles: agent.py composes the session,
   meeting_agent.py adapts framework behavior, and meeting_tools.py owns actions.
   Keep Pipecat-specific transport and tool-registration code separate.
-- Let Pipecat initialize context and register handlers attached to FunctionSchema.
-  Preserve the admission guard that prevents an automatic startup reply.
-- app/meeting_agent.py owns request admission and explicit input item references.
-  Input transcription is only for address and listening-resume checks. Keep
-  unrelated audio out of response context; do not restore a separate STT/LLM/TTS
-  pipeline or automatically respond to every detected speech turn.
+- app/addressed_audio.py uses Flux STT only to identify addressed requests and
+  match them to bounded PCM. Send only admitted audio to Voice Agent.
+- app/meeting_agent.py owns turn cancellation and bounded conversation history.
+  A fresh Voice Agent socket for each admitted request isolates untagged audio
+  and tool calls from superseded turns. Keep startup silent.
 - Nine tools: start_screenshare, send_chat_message, send_current_page_link,
   stop_screenshare, leave_call, mute_agent, unmute_agent, stop_listening,
   start_listening.
@@ -37,9 +34,8 @@ of the sibling LiveKit sample. The launcher has one meeting-URL input.
   across listening changes. Never replay skipped speech or requests.
 - Each tool posts chat feedback; requested messages and links are their own
   confirmation. A feedback failure must not repeat or undo an action.
-- Stream Realtime audio as it arrives. Brief tool acknowledgments are allowed;
-  never hold an entire answer to guarantee silent tools. Keep native Pipecat tool
-  handling and interruption truncation; preserve addressed-request admission.
+- Stream reply audio through Simli as it arrives. Client-side Voice Agent
+  function calls must pass application authorization before calling Recall.
 - Page sharing displays a public HTTPS URL; it does not read or control the page.
   Preserve the last accepted URL if a later request fails. Only explicitly
   requested actions are allowed after the startup introduction.

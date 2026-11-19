@@ -1,12 +1,9 @@
-"""Describe the nine meeting tools with their Pipecat handler attached."""
+"""Register Deepgram client-side functions and run authorized meeting actions."""
 
 import asyncio
 import json
 
-from pipecat.adapters.llm.schemas.direct_function import tool_options
 from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
-from pipecat.frames.frames import FunctionCallResultProperties, LLMRunFrame
-from pipecat.services.llm_service import FunctionCallParams
 
 from app.meeting_tools import MeetingTools, ToolError
 
@@ -25,66 +22,78 @@ TOOL_SCHEMAS = [
     FunctionSchema("start_listening", "Resume requests, preserving mute and discarding skipped requests.", {}, []),
 ]
 
-CONTROL_TOOLS = {"mute_agent", "unmute_agent", "stop_listening", "start_listening", "leave_call"}
+
+def voice_agent_functions() -> list[dict]:
+    return [{
+        "name": schema.name,
+        "description": schema.description,
+        "parameters": {
+            "type": "object",
+            "properties": schema.properties,
+            "required": schema.required,
+        },
+        "defer_until_eot": True,
+    } for schema in TOOL_SCHEMAS]
 
 
-def create_meeting_tool_schemas(tools: MeetingTools, finished: asyncio.Event) -> list[FunctionSchema]:
-    completed: dict[tuple[int, str, str], str] = {}
-    schemas = {schema.name: schema for schema in TOOL_SCHEMAS}
+class VoiceAgentTools:
+    def __init__(self, tools: MeetingTools, finished: asyncio.Event):
+        self._tools = tools
+        self._finished = finished
+        self._schemas = {schema.name: schema for schema in TOOL_SCHEMAS}
+        self._lock = asyncio.Lock()
+        self._actions: set[asyncio.Task[tuple[str, bool]]] = set()
 
-    # An interruption must not abandon a Recall request already in flight.
-    @tool_options(cancel_on_interruption=False, timeout_secs=90)
-    async def execute(params: FunctionCallParams):
-        # The realtime service binds the call to the response that produced it.
-        # Reading the current generation here could authorize a delayed old call.
-        generation = params.llm.function_call_generation(params.tool_call_id)
-        repeat = False
-        key = (generation, params.function_name, json.dumps(dict(params.arguments), sort_keys=True))
+    async def execute(
+        self, generation: int, name: str, arguments: str, completed: dict[tuple[str, str], str],
+    ) -> tuple[str, bool]:
+        # Once a Recall request starts, an interruption must not abandon it.
+        task = asyncio.create_task(self._execute(generation, name, arguments, completed))
+        self._actions.add(task)
+        task.add_done_callback(self._action_done)
+        return await asyncio.shield(task)
+
+    def _action_done(self, task: asyncio.Task[tuple[str, bool]]) -> None:
+        self._actions.discard(task)
+        if not task.cancelled():
+            # The response task may have gone away. Do not log a detached
+            # exception that could include meeting content.
+            task.exception()
+
+    async def drain(self) -> None:
+        if self._actions:
+            await asyncio.gather(*self._actions, return_exceptions=True)
+
+    async def _execute(
+        self, generation: int, name: str, arguments: str, completed: dict[tuple[str, str], str],
+    ) -> tuple[str, bool]:
+        schema = self._schemas.get(name)
         try:
-            if generation != tools.state.generation:
-                raise ToolError("Request superseded. Do not execute or replay it.")
-            schema = schemas[params.function_name]
-            if (set(params.arguments) != set(schema.required)
-                    or any(not isinstance(value, str) for value in params.arguments.values())):
-                raise ToolError("The tool arguments do not match the requested action.")
+            params = json.loads(arguments)
+        except (TypeError, ValueError):
+            params = None
+        if (schema is None or not isinstance(params, dict)
+                or set(params) != set(schema.required)
+                or any(not isinstance(value, str) for value in params.values())):
+            return "The tool arguments do not match a meeting action.", False
+
+        key = (name, json.dumps(params, sort_keys=True))
+        async with self._lock:
+            state = self._tools.state
+            if generation != state.generation or not state.is_listening or state.is_leaving:
+                return "Request superseded. Do not execute or replay it.", False
             if key in completed:
-                repeat = True
-                result = completed[key]
+                return completed[key], False
+            # Reserve before any external request to stop duplicate calls.
+            completed[key] = "The action was already attempted. Do not retry."
+            try:
+                result = await getattr(self._tools, name)(**params)
+            except ToolError as error:
+                result = str(error)
+                succeeded = False
             else:
-                # Reserve before sending: cancellation cannot make an uncertain
-                # external action eligible for another automatic attempt.
-                completed[key] = "Action already attempted; result unconfirmed. Do not retry."
-                result = await getattr(tools, schema.name)(**params.arguments)
-                completed[key] = result
-        except ToolError as error:
-            result = str(error)
-            # Even an uncertain failure must never be retried automatically.
+                succeeded = True
             completed[key] = result
-            repeat = True
-        # Let the model acknowledge a result or perform the next requested
-        # action. Controls end the turn so muted/paused speech cannot replay.
-        continue_request = (
-            not repeat and params.function_name not in CONTROL_TOOLS
-            and generation == tools.state.generation
-        )
-
-        async def resume_request():
-            if (generation == tools.state.generation and tools.state.is_listening
-                    and not tools.state.is_leaving):
-                await params.llm.push_frame(LLMRunFrame())
-
-        # Pipecat 1.16 can lose a deferred tool continuation when speech ends.
-        # Request it explicitly after the result has reached the context.
-        await params.result_callback(
-            result, properties=FunctionCallResultProperties(
-                run_llm=False, on_context_updated=resume_request if continue_request else None,
-            ),
-        )
-        if tools.state.is_leaving:
-            finished.set()
-
-    # LLMContext registers attached handlers automatically. Each meeting gets
-    # its own handler and completed-call state; the definitions stay reusable.
-    return [FunctionSchema(
-        schema.name, schema.description, schema.properties, schema.required, handler=execute,
-    ) for schema in TOOL_SCHEMAS]
+            if state.is_leaving:
+                self._finished.set()
+            return result, succeeded

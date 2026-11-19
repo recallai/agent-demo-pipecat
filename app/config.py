@@ -36,17 +36,6 @@ def session_timeout() -> int:
     return seconds
 
 
-def realtime_reasoning_effort() -> str | None:
-    effort = os.getenv("REALTIME_REASONING_EFFORT", "low").strip().lower()
-    if effort == "default":
-        return None
-    if effort not in {"minimal", "low", "medium", "high", "xhigh"}:
-        raise ValueError(
-            "REALTIME_REASONING_EFFORT must be minimal, low, medium, high, xhigh, or default."
-        )
-    return effort
-
-
 def webrtc_ice_servers() -> list[RTCIceServer]:
     value = os.getenv("WEBRTC_ICE_SERVERS", '[{"urls":"stun:stun.l.google.com:19302"}]')
     try:
@@ -64,10 +53,9 @@ def webrtc_ice_servers() -> list[RTCIceServer]:
 
 
 def validate_agent_settings() -> None:
-    for name in ("OPENAI_API_KEY", "SIMLI_API_KEY", "SIMLI_FACE_ID",
-                 "REALTIME_MODEL", "REALTIME_VOICE"):
+    for name in ("DEEPGRAM_API_KEY", "DEEPGRAM_AGENT_MODEL", "DEEPGRAM_AGENT_VOICE",
+                 "SIMLI_API_KEY", "SIMLI_FACE_ID"):
         require_env(name)
     public_origin()
     session_timeout()
-    realtime_reasoning_effort()
     webrtc_ice_servers()

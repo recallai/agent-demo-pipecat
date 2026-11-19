@@ -3,25 +3,24 @@
 import asyncio
 import logging
 
-from pipecat.frames.frames import LLMContextFrame, OutputImageRawFrame
+from pipecat.frames.frames import OutputImageRawFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
-from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
+from pipecat.processors.frameworks.rtvi import RTVIObserverParams
 from pipecat.processors.idle_frame_processor import IdleFrameProcessor
-from pipecat.services.openai.realtime import events
 from pipecat.services.simli.video import SimliVideoService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 from pipecat.workers.runner import WorkerRunner
 
-from app.config import realtime_reasoning_effort, require_env, session_timeout
-from app.meeting_agent import MeetingAgent
+from app.addressed_audio import ADMISSION_SAMPLE_RATE, AddressedAudio
+from app.config import require_env, session_timeout
+from app.meeting_agent import OUTPUT_SAMPLE_RATE, MeetingAgent
 from app.meeting_tools import MeetingState, MeetingTools
 from app.recall_client import RecallClient, RecallError
 from app.speech_output import AudioGate
-from app.tool_registration import create_meeting_tool_schemas
+from app.tool_registration import VoiceAgentTools, voice_agent_functions
 
 logger = logging.getLogger("meeting-demo")
 # Preserve the preset's native framing; a smaller canvas crops its face.
@@ -38,8 +37,8 @@ usually a few sentences, with more explanation when the question needs it. Ask a
 brief clarification when a request is ambiguous. Avoid unsolicited advice and
 repeated offers of help. Understand natural phrasing rather than requiring command names.
 
-Use tools only for requested actions. Keep any spoken acknowledgment brief; wait
-for the tool result before claiming success. Each tool also posts chat feedback.
+Use tools only for requested actions. Speak after all required tool results
+arrive, and keep acknowledgments brief. Each tool also posts chat feedback.
 Starting a share does not authorize posting its link. When both are requested,
 wait for the share to succeed, then call send_current_page_link.
 Never repeat an action or retry an
@@ -60,11 +59,34 @@ INTRO_CHAT_MESSAGE = (
 )
 
 
+def voice_agent_settings() -> dict:
+    return {
+        "audio": {
+            "input": {"encoding": "linear16", "sample_rate": ADMISSION_SAMPLE_RATE},
+            "output": {"encoding": "linear16", "sample_rate": OUTPUT_SAMPLE_RATE, "container": "none"},
+        },
+        "agent": {
+            "language": "en",
+            "listen": {"provider": {
+                "type": "deepgram", "version": "v2", "model": "flux-general-en",
+                "eot_timeout_ms": 1000,
+            }},
+            "think": {
+                "provider": {"type": "open_ai", "model": require_env("DEEPGRAM_AGENT_MODEL")},
+                "prompt": INSTRUCTIONS,
+                "functions": voice_agent_functions(),
+            },
+            "speak": {"provider": {
+                "type": "deepgram", "model": require_env("DEEPGRAM_AGENT_VOICE"),
+            }},
+        },
+    }
+
+
 async def run_agent(connection: SmallWebRTCConnection, bot_id: str) -> None:
     finished = asyncio.Event()
     state = MeetingState()
-    api_key = require_env("OPENAI_API_KEY")
-    effort = realtime_reasoning_effort()
+    deepgram_key = require_env("DEEPGRAM_API_KEY")
     transport = SmallWebRTCTransport(connection, TransportParams(
         audio_in_enabled=True, audio_out_enabled=True, video_out_enabled=True,
         video_out_width=AVATAR_SIZE, video_out_height=AVATAR_SIZE,
@@ -85,27 +107,11 @@ async def run_agent(connection: SmallWebRTCConnection, bot_id: str) -> None:
         require_env("RECALL_API_KEY"), require_env("RECALL_API_BASE_URL"),
     ) as client:
         tools = MeetingTools(client, bot_id, state, speech.silence)
-        llm = MeetingAgent(
-            state=state, resume_listening=tools.start_listening, api_key=api_key,
-            settings=MeetingAgent.Settings(
-                model=require_env("REALTIME_MODEL"), system_instruction=INSTRUCTIONS,
-                session_properties=events.SessionProperties(
-                    output_modalities=["audio"],
-                    reasoning=events.Reasoning(effort=effort) if effort else None,
-                    audio=events.AudioConfiguration(
-                        input=events.AudioInput(
-                            transcription=events.InputAudioTranscription(
-                                model="gpt-4o-mini-transcribe", language="en",
-                            ),
-                        ),
-                        output=events.AudioOutput(voice=require_env("REALTIME_VOICE")),
-                    ),
-                ),
-            ),
+        admission = AddressedAudio(
+            api_key=deepgram_key, state=state, resume_listening=tools.start_listening,
         )
-        context = LLMContext(tools=create_meeting_tool_schemas(tools, finished))
-        # Admission is controlled by our service, not automatic transcript turns.
-        aggregators = LLMContextAggregatorPair(context, realtime_service_mode=False)
+        tool_bridge = VoiceAgentTools(tools, finished)
+        voice = MeetingAgent(deepgram_key, voice_agent_settings(), state, tool_bridge)
         avatar = SimliVideoService(
             api_key=require_env("SIMLI_API_KEY"), face_id=require_env("SIMLI_FACE_ID"),
             max_session_length=session_timeout(), max_idle_time=session_timeout(),
@@ -113,19 +119,20 @@ async def run_agent(connection: SmallWebRTCConnection, bot_id: str) -> None:
         )
         pipeline = Pipeline([
             transport.input(),
-            aggregators.user(),
-            llm,
+            admission,
+            voice,
             speech,
             avatar,
             IdleFrameProcessor(callback=on_avatar_stalled, timeout=15, types=[OutputImageRawFrame]),
             AudioGate(state),
             transport.output(),
-            aggregators.assistant(),
         ])
         # Native RTVI handles Recall's ready handshake and playback interruptions.
         worker = PipelineWorker(pipeline, params=PipelineParams(
-            audio_in_sample_rate=16000, audio_out_sample_rate=24000,
-        ), idle_timeout_secs=None, enable_rtvi=True)
+            audio_in_sample_rate=ADMISSION_SAMPLE_RATE, audio_out_sample_rate=OUTPUT_SAMPLE_RATE,
+        ), idle_timeout_secs=None, enable_rtvi=True,
+            rtvi_observer_params=RTVIObserverParams(ignored_sources=[admission]),
+        )
 
         @transport.event_handler("on_client_connected")
         async def on_connected(_transport, _peer):
@@ -139,13 +146,15 @@ async def run_agent(connection: SmallWebRTCConnection, bot_id: str) -> None:
             finished.set()
 
         @worker.event_handler("on_pipeline_error")
-        async def on_pipeline_error(_worker, _frame):
+        async def on_pipeline_error(_worker, frame):
             nonlocal pipeline_failed
             pipeline_failed = True
-            logger.error("A voice or avatar service failed; ending the meeting session")
+            logger.error(
+                "The meeting pipeline failed in %s; ending the session",
+                type(frame.processor).__name__,
+            )
             finished.set()
 
-        await worker.queue_frame(LLMContextFrame(context))
         runner = WorkerRunner(handle_sigint=False)
         await runner.add_workers(worker)
         runner_task = asyncio.create_task(runner.run())
@@ -156,6 +165,7 @@ async def run_agent(connection: SmallWebRTCConnection, bot_id: str) -> None:
             finished_task.cancel()
             await worker.cancel()
             results = await asyncio.gather(runner_task, finished_task, return_exceptions=True)
+            await tool_bridge.drain()
         if isinstance(results[0], Exception):
             raise RuntimeError("The agent worker failed.") from results[0]
         if pipeline_failed:
