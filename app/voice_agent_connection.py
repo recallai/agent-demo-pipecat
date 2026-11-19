@@ -3,7 +3,7 @@
 import asyncio
 import json
 import logging
-from contextlib import suppress
+from contextlib import AsyncExitStack, asynccontextmanager
 
 from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import InvalidStatus, WebSocketException
@@ -22,54 +22,38 @@ class VoiceAgentError(Exception):
     """A Voice Agent failure with a message safe to report."""
 
 
-class VoiceAgentConnection:
-    def __init__(self, api_key: str, settings: dict):
-        self._api_key = api_key
-        self._settings = {**settings, "type": "Settings"}
-        self._connection: ClientConnection | None = None
-
-    async def __aenter__(self):
+@asynccontextmanager
+async def open_voice_agent(api_key: str, settings: dict):
+    async with AsyncExitStack() as stack:
         try:
             async with asyncio.timeout(SETUP_TIMEOUT):
-                self._connection = await connect(
+                socket = await stack.enter_async_context(connect(
                     VOICE_AGENT_URL,
-                    additional_headers={"Authorization": f"Token {self._api_key}"},
+                    additional_headers={"Authorization": f"Token {api_key}"},
                     proxy=None,
                     compression=None,
                     close_timeout=CLOSE_TIMEOUT,
                     logger=wire_logger,
-                )
-                await self._wait_for("Welcome")
-                await self.send_event(self._settings)
-                await self._wait_for("SettingsApplied")
-        except BaseException as error:
-            await self._close()
-            if isinstance(error, InvalidStatus):
-                status = error.response.status_code
-                raise VoiceAgentError(f"Deepgram Voice Agent rejected the connection (HTTP {status}).") from None
-            if isinstance(error, TimeoutError):
-                raise VoiceAgentError("Deepgram Voice Agent setup timed out.") from None
-            if isinstance(error, (OSError, WebSocketException)):
-                raise VoiceAgentError("Could not connect to Deepgram Voice Agent.") from None
-            raise
-        return self
+                ))
+                voice = VoiceAgentConnection(socket)
+                await voice.wait_for("Welcome")
+                await voice.send_event({**settings, "type": "Settings"})
+                await voice.wait_for("SettingsApplied")
+        except InvalidStatus as error:
+            status = error.response.status_code
+            raise VoiceAgentError(f"Deepgram Voice Agent rejected the connection (HTTP {status}).") from None
+        except TimeoutError:
+            raise VoiceAgentError("Deepgram Voice Agent setup timed out.") from None
+        except (OSError, WebSocketException):
+            raise VoiceAgentError("Could not connect to Deepgram Voice Agent.") from None
+        yield voice
 
-    async def __aexit__(self, *_):
-        await self._close()
 
-    async def _close(self) -> None:
-        connection, self._connection = self._connection, None
-        if connection is not None:
-            # websockets aborts the connection if its close handshake times out.
-            with suppress(OSError, WebSocketException, TimeoutError):
-                await connection.close()
+class VoiceAgentConnection:
+    def __init__(self, socket: ClientConnection):
+        self._socket = socket
 
-    def _active_connection(self) -> ClientConnection:
-        if self._connection is None:
-            raise VoiceAgentError("Deepgram Voice Agent is not connected.")
-        return self._connection
-
-    async def _wait_for(self, event_type: str) -> None:
+    async def wait_for(self, event_type: str) -> None:
         while True:
             event = await self.receive()
             if isinstance(event, bytes):
@@ -80,7 +64,7 @@ class VoiceAgentConnection:
     async def _send(self, message: bytes | str) -> None:
         try:
             async with asyncio.timeout(WRITE_TIMEOUT):
-                await self._active_connection().send(message)
+                await self._socket.send(message)
         except (OSError, WebSocketException, TimeoutError):
             raise VoiceAgentError("Could not send data to Deepgram Voice Agent.") from None
 
@@ -96,7 +80,7 @@ class VoiceAgentConnection:
 
     async def receive(self) -> bytes | dict:
         try:
-            message = await self._active_connection().recv()
+            message = await self._socket.recv()
         except (OSError, WebSocketException):
             raise VoiceAgentError("Deepgram Voice Agent connection closed.") from None
         if isinstance(message, bytes):

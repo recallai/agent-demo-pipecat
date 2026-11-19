@@ -16,11 +16,11 @@ from pipecat.workers.runner import WorkerRunner
 
 from app.addressed_audio import ADMISSION_SAMPLE_RATE, AddressedAudio
 from app.config import require_env, session_timeout
-from app.meeting_agent import OUTPUT_SAMPLE_RATE, MeetingAgent
+from app.meeting_agent import OUTPUT_SAMPLE_RATE, DeepgramVoiceAgent
 from app.meeting_tools import MeetingState, MeetingTools
 from app.recall_client import RecallClient, RecallError
 from app.speech_output import AudioGate
-from app.tool_registration import VoiceAgentTools, voice_agent_functions
+from app.tool_registration import VOICE_AGENT_FUNCTIONS, VoiceAgentTools
 
 logger = logging.getLogger("meeting-demo")
 # Preserve the preset's native framing; a smaller canvas crops its face.
@@ -74,7 +74,7 @@ def voice_agent_settings() -> dict:
             "think": {
                 "provider": {"type": "open_ai", "model": require_env("DEEPGRAM_AGENT_MODEL")},
                 "prompt": INSTRUCTIONS,
-                "functions": voice_agent_functions(),
+                "functions": list(VOICE_AGENT_FUNCTIONS),
             },
             "speak": {"provider": {
                 "type": "deepgram", "model": require_env("DEEPGRAM_AGENT_VOICE"),
@@ -94,7 +94,8 @@ async def run_agent(connection: SmallWebRTCConnection, bot_id: str) -> None:
         video_out_is_live=False,
         video_out_framerate=15,
     ))
-    speech = AudioGate(state)
+    before_avatar = AudioGate(state)
+    after_avatar = AudioGate(state)
     pipeline_failed = False
 
     async def on_avatar_stalled(_processor):
@@ -106,12 +107,12 @@ async def run_agent(connection: SmallWebRTCConnection, bot_id: str) -> None:
     async with RecallClient(
         require_env("RECALL_API_KEY"), require_env("RECALL_API_BASE_URL"),
     ) as client:
-        tools = MeetingTools(client, bot_id, state, speech.silence)
+        tools = MeetingTools(client, bot_id, state, before_avatar.silence)
         admission = AddressedAudio(
             api_key=deepgram_key, state=state, resume_listening=tools.start_listening,
         )
         tool_bridge = VoiceAgentTools(tools, finished)
-        voice = MeetingAgent(deepgram_key, voice_agent_settings(), state, tool_bridge)
+        voice = DeepgramVoiceAgent(deepgram_key, voice_agent_settings(), state, tool_bridge)
         avatar = SimliVideoService(
             api_key=require_env("SIMLI_API_KEY"), face_id=require_env("SIMLI_FACE_ID"),
             max_session_length=session_timeout(), max_idle_time=session_timeout(),
@@ -121,10 +122,10 @@ async def run_agent(connection: SmallWebRTCConnection, bot_id: str) -> None:
             transport.input(),
             admission,
             voice,
-            speech,
+            before_avatar,
             avatar,
             IdleFrameProcessor(callback=on_avatar_stalled, timeout=15, types=[OutputImageRawFrame]),
-            AudioGate(state),
+            after_avatar,  # Simli can still return audio it received before a mute.
             transport.output(),
         ])
         # Native RTVI handles Recall's ready handshake and playback interruptions.

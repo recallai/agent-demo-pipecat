@@ -2,6 +2,12 @@
 
 A small agent demo using [Recall.ai's native Pipecat integration](https://docs.recall.ai/docs/meeting-agents-pipecat) and the [full Deepgram Voice Agent API](https://developers.deepgram.com/reference/voice-agent/voice-agent). It includes a lip-synced Simli avatar and nine meeting tools.
 
+```text
+Recall meeting audio → Flux address check → Deepgram Voice Agent → Simli → Recall
+```
+
+Flux checks for “Assistant” before the app sends any request audio to Voice Agent. Voice Agent transcribes that approved audio and handles reasoning, tools, and speech. The extra transcription pass lets the app keep background speech from triggering or interrupting replies while still using Voice Agent's audio input.
+
 ## Behavior
 
 Address the avatar as **“Assistant”** or **“pipecat demo”**, followed by a question or command. The agent joins silently and posts an introduction in chat. Tool calls post their results in chat and may include a brief spoken acknowledgment.
@@ -113,23 +119,15 @@ The session defaults to 10 minutes; launch another bot to repeat the demo.
 
 | File | Responsibility |
 | --- | --- |
-| `app/web.py` | Serve the form, create a Recall bot, and run both HTTP servers. |
-| `app/templates/index.html` | Local meeting launcher form. |
-| `app/agent.py` | Instructions, Voice Agent settings, avatar startup, and cleanup. |
-| `app/addressed_audio.py` | Match finalized Flux turns to bounded PCM and admit addressed requests. |
-| `app/meeting_agent.py` | Voice Agent turn lifecycle, speech frames, and conversation history. |
-| `app/voice_agent_connection.py` | Deepgram WebSocket handshake, audio, and events. |
-| `app/meeting_tools.py` | Nine tools, listening/mute state, and the current page URL. |
-| `app/speech_output.py` | Suppress muted and interrupted audio before and after the avatar. |
-| `app/recall_client.py` | Recall HTTP requests and clear errors. |
-| `app/config.py` | Load and validate `.env`. |
-| `app/media_server.py` | Authenticated WebRTC offers, renegotiation, and session cleanup. |
-| `app/tool_registration.py` | Define and authorize Deepgram client-side function calls. |
-| `app/request_filter.py` | Recognize agent addresses and the standalone listening-resume command. |
+| [app/agent.py](app/agent.py) | Settings and Pipecat pipeline. |
+| [app/addressed_audio.py](app/addressed_audio.py) | Match approved requests to buffered meeting audio. |
+| [app/meeting_agent.py](app/meeting_agent.py), [app/voice_agent_connection.py](app/voice_agent_connection.py) | Stream each Voice Agent turn and carry conversation context forward. |
+| [app/tool_registration.py](app/tool_registration.py), [app/meeting_tools.py](app/meeting_tools.py) | Define and run the nine meeting actions. |
+| [app/recall_client.py](app/recall_client.py) | Create the bot and call Recall's meeting APIs. |
 
 Recall runs a **four-core Google Meet bot** with one `output_media.camera.kind = "pipecat"` source for meeting audio and avatar video. The launcher passes an expiring session token in `config.body`; Recall forwards it as `requestData` to `/api/offer`. Audio and video connect directly over WebRTC.
 
-Pipecat uses Flux STT to identify addressed requests and sends the approved audio to Deepgram Voice Agent. Deepgram runs speech recognition, the hosted text model, and speech synthesis. Pipecat streams the reply through Simli for synchronized audio and video. Each admitted request opens a new Voice Agent connection to isolate interrupted audio and tool calls, and the app carries a bounded conversation history forward.
+Each admitted request opens a new Voice Agent connection so interrupted audio and tool calls stay with that request. The app carries a bounded conversation history forward. Simli returns synchronized speech and video. The app checks mute both before sending speech to Simli and after Simli returns buffered audio.
 
 Client-side tools run on our server using the bot ID returned by Create Bot. Five call Recall and four control speech and listening locally. Muting silences speech while leaving tools available. Stopping listening ignores requests until a standalone **“Assistant, start listening”** command. As the agent hears mixed meeting audio, overlapping voices can be present inside an admitted request.
 

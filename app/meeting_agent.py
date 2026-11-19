@@ -3,7 +3,6 @@
 import asyncio
 import logging
 from collections import deque
-from contextlib import suppress
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -23,7 +22,7 @@ from pipecat.utils.time import time_now_iso8601
 from app.addressed_audio import ADMISSION_SAMPLE_RATE, AddressedAudioFrame
 from app.meeting_tools import MeetingState
 from app.tool_registration import VoiceAgentTools
-from app.voice_agent_connection import VoiceAgentConnection, VoiceAgentError
+from app.voice_agent_connection import VoiceAgentConnection, VoiceAgentError, open_voice_agent
 
 OUTPUT_SAMPLE_RATE = 24000
 INPUT_CHUNK_BYTES = ADMISSION_SAMPLE_RATE * 2 * 80 // 1000
@@ -33,7 +32,7 @@ REPLY_DRAIN_SECONDS = 0.4
 logger = logging.getLogger("meeting-demo")
 
 
-class MeetingAgent(FrameProcessor):
+class DeepgramVoiceAgent(FrameProcessor):
     def __init__(self, api_key: str, settings: dict, state: MeetingState, tools: VoiceAgentTools):
         super().__init__()
         self._api_key = api_key
@@ -92,7 +91,7 @@ class MeetingAgent(FrameProcessor):
         connected = False
         try:
             async with asyncio.timeout(MAX_TURN_SECONDS):
-                async with VoiceAgentConnection(self._api_key, settings) as voice:
+                async with open_voice_agent(self._api_key, settings) as voice:
                     connected = True
                     audio = turn.audio + TRAILING_SILENCE
                     for start in range(0, len(audio), INPUT_CHUNK_BYTES):
@@ -173,7 +172,8 @@ class MeetingAgent(FrameProcessor):
             ])
 
     async def _run_functions(
-        self, voice: VoiceAgentConnection, event: dict, turn: AddressedAudioFrame, completed: dict,
+        self, voice: VoiceAgentConnection, event: dict, turn: AddressedAudioFrame,
+        completed: dict[tuple[str, str], str],
     ):
         calls = event.get("functions")
         if not isinstance(calls, list):
@@ -181,23 +181,9 @@ class MeetingAgent(FrameProcessor):
         for call in calls:
             if not self._current(turn):
                 return
-            if not isinstance(call, dict) or call.get("client_side") is not True:
-                continue
-            name, call_id, arguments = (call.get(field) for field in ("name", "id", "arguments"))
-            if not all(isinstance(value, str) for value in (name, call_id, arguments)):
-                continue
-            if not call_id or len(call_id) > 256 or len(name) > 80 or len(arguments) > 4096:
-                continue
-            result, succeeded = await self._tools.execute(turn.generation, name, arguments, completed)
-            response = {"type": "FunctionCallResponse", "id": call_id, "name": name, "content": result}
-            signature = call.get("thought_signature")
-            if isinstance(signature, str):
-                response["thought_signature"] = signature
+            response = await self._tools.execute_call(turn.generation, call, completed)
             if not self._current(turn):
-                # A control ended this turn. Its state and chat result are
-                # already applied, and no subsequent speech may escape.
-                if succeeded:
-                    with suppress(VoiceAgentError):
-                        await voice.send_event(response)
+                # A control or newer request ended this turn. Close its socket.
                 return
-            await voice.send_event(response)
+            if response is not None:
+                await voice.send_event(response)

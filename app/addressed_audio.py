@@ -1,6 +1,7 @@
 """Use Flux to admit addressed turns before sending their PCM to the Voice Agent."""
 
 import asyncio
+import re
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
@@ -21,13 +22,18 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
 
 from app.meeting_tools import MeetingState
-from app.request_filter import ADDRESS, RESUME
 
 ADMISSION_SAMPLE_RATE = 16000
 _BYTES_PER_SECOND = ADMISSION_SAMPLE_RATE * 2
 _HISTORY_SECONDS = 30
 _RESULT_TIMEOUT_SECONDS = 10
 _audio_capture = ContextVar[tuple[float, bool] | None]("audio_capture", default=None)
+_ADDRESS = re.compile(
+    r"^\s*(?:(?:hey|hi|hello|ok|okay)[,\s]+)?"
+    r"(?:assistant|pipe\s*cat\s+demo)\b[\s,;:.!?–—-]*",
+    re.IGNORECASE,
+)
+_RESUME = re.compile(r"(?:please\s+)?start\s+listening(?:\s+please)?[.!?]*", re.IGNORECASE)
 
 
 @dataclass
@@ -161,7 +167,7 @@ class AddressedAudio(DeepgramFluxSTTService):
         await super().push_frame(frame, direction)
 
     async def _admit(self, transcript: TranscriptionFrame) -> None:
-        address = ADDRESS.match(transcript.text)
+        address = _ADDRESS.match(transcript.text)
         request = transcript.text[address.end():].strip() if address else ""
         data = transcript.result
         if not isinstance(data, dict) or data.get("event") != "EndOfTurn":
@@ -182,7 +188,7 @@ class AddressedAudio(DeepgramFluxSTTService):
         if cutoff is not None and started_at <= cutoff:
             return
         if not self._state.is_listening:
-            if not was_listening and RESUME.fullmatch(request):
+            if not was_listening and _RESUME.fullmatch(request):
                 await self._resume_listening()
             return
         if not was_listening:
