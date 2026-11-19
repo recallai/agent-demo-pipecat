@@ -59,21 +59,25 @@
     let pending = false;
     let activeBotId = null;
 
-    function watchTranscript(botId) {
+    async function watchTranscript(botId) {
+      activeBotId = botId;
+      const url = "/api/bots/" + encodeURIComponent(botId) + "/transcript";
       let lastUtteranceId = null;
+      utterances.replaceChildren();
+      transcriptStatus.textContent = "Waiting for speech…";
+      transcript.hidden = false;
 
-      async function refresh() {
-        if (activeBotId !== botId) return;
+      while (activeBotId === botId) {
+        let message;
         try {
-          const response = await fetch("/api/bots/" + encodeURIComponent(botId) + "/transcript");
+          const response = await fetch(url);
+          if (!response.ok && response.status !== 404) throw new Error("Transcript unavailable.");
+          const rows = response.ok ? await response.json() : null;
           if (activeBotId !== botId) return;
-          if (response.status === 404) {
+          if (rows === null) {
             transcriptStatus.textContent = "Meeting session ended.";
             return;
           }
-          if (!response.ok) throw new Error("Transcript unavailable.");
-          const rows = await response.json();
-          if (activeBotId !== botId) return;
           const newestId = rows.at(-1)?.id ?? null;
           if (lastUtteranceId !== newestId) {
             const following = utterances.scrollHeight - utterances.scrollTop - utterances.clientHeight < 12;
@@ -85,19 +89,14 @@
             if (following) utterances.scrollTop = utterances.scrollHeight;
             lastUtteranceId = newestId;
           }
-          transcriptStatus.textContent = rows.length ? "" : "Waiting for speech…";
+          message = rows.length ? "" : "Waiting for speech…";
         } catch {
           if (activeBotId !== botId) return;
-          transcriptStatus.textContent = "Reconnecting to the transcript…";
+          message = "Reconnecting to the transcript…";
         }
-        setTimeout(refresh, 1000);
+        if (transcriptStatus.textContent !== message) transcriptStatus.textContent = message;
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
-
-      activeBotId = botId;
-      utterances.replaceChildren();
-      transcriptStatus.textContent = "Waiting for speech…";
-      transcript.hidden = false;
-      refresh();
     }
 
     const linkedBot = new URLSearchParams(window.location.search).get("bot");

@@ -53,7 +53,7 @@ async def index():
 
 @app.get("/api/bots/{bot_id}/transcript")
 async def live_transcript(bot_id: str):
-    session = sessions.for_bot(bot_id)
+    session = sessions.find_by_bot_id(bot_id)
     if session is None:
         raise HTTPException(404, "This meeting session has ended or is unavailable.")
     return JSONResponse(list(session.utterances), headers={"Cache-Control": "no-store"})

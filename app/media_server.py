@@ -57,7 +57,7 @@ class MeetingSessions:
             raise HTTPException(404, "This meeting session is unavailable or expired.")
         return session
 
-    def for_bot(self, bot_id: str) -> MeetingSession | None:
+    def find_by_bot_id(self, bot_id: str) -> MeetingSession | None:
         return next((session for session in self.entries.values() if session.bot_id == bot_id), None)
 
     async def bind_bot(self, session: MeetingSession, bot_id: str) -> None:
@@ -145,8 +145,8 @@ class TranscriptEvent(BaseModel):
     words: list[TranscriptWord] = Field(validation_alias=AliasPath("data", "data", "words"))
 
 
-@media_app.post("/api/transcript/", status_code=204)
-async def receive_transcript(request: Request, token: str = "") -> Response:
+@media_app.post("/api/transcript/", status_code=204, response_class=Response)
+async def receive_transcript(request: Request, token: str = "") -> None:
     session = sessions.require(token)
     # Recall may deliver an utterance before Create Bot returns its ID.
     if session.bot_id is None:
@@ -163,13 +163,13 @@ async def receive_transcript(request: Request, token: str = "") -> Response:
         raise HTTPException(400, "Invalid transcript event.") from None
 
     if session.closed or event.bot_id != session.bot_id:
-        return Response(status_code=204)
+        return
 
-    event_id = hashlib.sha256(body).hexdigest()
+    # A webhook retry has the same payload even if its headers change.
+    utterance_id = hashlib.sha256(body).hexdigest()
     text = " ".join(word.text for word in event.words).strip()
-    if text and not any(row["id"] == event_id for row in session.utterances):
-        session.utterances.append({"id": event_id, "speaker": event.speaker or "", "text": text})
-    return Response(status_code=204)
+    if text and not any(row["id"] == utterance_id for row in session.utterances):
+        session.utterances.append({"id": utterance_id, "speaker": event.speaker or "", "text": text})
 
 
 class SessionData(BaseModel):
