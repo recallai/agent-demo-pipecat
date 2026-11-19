@@ -100,6 +100,9 @@
       refresh();
     }
 
+    const linkedBot = new URLSearchParams(window.location.search).get("bot");
+    if (linkedBot) watchTranscript(linkedBot);
+
     input.addEventListener("input", () => {
       if (!pending) {
         button.disabled = false;
@@ -128,6 +131,7 @@
           throw new Error(detail || "The agent could not be requested.");
         }
         status.textContent = result.message;
+        history.replaceState(null, "", "?bot=" + encodeURIComponent(result.bot_id));
         watchTranscript(result.bot_id);
       } catch (error) {
         status.dataset.error = "true";
