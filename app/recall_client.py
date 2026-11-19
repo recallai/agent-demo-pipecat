@@ -93,7 +93,10 @@ class RecallClient:
                 "bot_name": BOT_NAME,
                 "variant": {"google_meet": "web_4_core"},
                 "recording_config": {
-                    "transcript": {"provider": {"deepgram_streaming": {"model": "nova-3"}}},
+                    "transcript": {
+                        "provider": {"deepgram_streaming": {"model": "nova-3"}},
+                        "diarization": {"use_separate_streams_when_available": True},
+                    },
                     "realtime_endpoints": [{
                         "type": "webhook",
                         "url": transcript_url,

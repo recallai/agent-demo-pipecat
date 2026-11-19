@@ -6,7 +6,7 @@ A small agent demo using [Recall.ai's native Pipecat integration](https://docs.r
 
 Address the avatar as **“Assistant”** or **“pipecat demo”**, followed by a question or command. The agent joins silently and posts an introduction in chat. Tool calls post their results in chat and may include a brief spoken acknowledgment.
 
-The launcher shows finalized meeting utterances from Deepgram Nova-3 as the meeting runs.
+The launcher shows finalized Deepgram Nova-3 utterances as the meeting runs. Recall uses separate audio streams for speaker attribution when available. [Perfect Diarization](https://docs.recall.ai/docs/diarization#perfect-diarization)
 
 | Action | Tool |
 | --- | --- |
