@@ -124,7 +124,7 @@ class MeetingTools:
         self._require_listening()
         if not message.strip() or len(message) > 500:
             await self._post_status("Message not sent: use 1 to 500 characters.")
-            raise ToolError("Google Meet messages must contain 1 to 500 characters.")
+            raise ToolError("Chat messages must contain 1 to 500 characters.")
         await self._call_recall(self.client.send_chat_message(self.bot_id, message))
         return "Recall accepted the chat message."
 

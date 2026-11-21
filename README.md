@@ -1,10 +1,12 @@
 # agent-demo-pipecat
 
-A small agent demo featuring [Recall.ai's native Pipecat integration](https://docs.recall.ai/docs/meeting-agents-pipecat) and an interactive Simli avatar you can command through nine tool calls.
+Send an interactive meeting agent to Google Meet, Zoom, Microsoft Teams, or Webex. It appears as a speaking avatar, answers questions aloud, and takes spoken requests to share a webpage, post in chat, or leave the call.
+
+Pipecat uses OpenAI Realtime for voice and Simli for the avatar. Recall connects the agent to the meeting. [Recall's Pipecat integration](https://docs.recall.ai/docs/meeting-agents-pipecat)
 
 ## Behavior
 
-Address the avatar as **“Assistant”** or **“pipecat demo”**, followed by a question or command. The agent joins silently and posts an introduction in chat. Tool calls post their results in chat and may include a brief spoken acknowledgment.
+Address the avatar as **“Assistant”** or **“pipecat demo”**, followed by a question or command. The agent joins silently. Where meeting chat is available, it posts an introduction and tool results there. Tool calls may include a brief spoken acknowledgment.
 
 | Action | Tool |
 | --- | --- |
@@ -26,7 +28,7 @@ Address the avatar as **“Assistant”** or **“pipecat demo”**, followed by
 - An OpenAI project API key with **Model capabilities → Request** access to Realtime and `gpt-4o-mini-transcribe`.
 - A Simli API key and a face available to that account.
 - An HTTPS tunnel, such as cloudflared, and a network that permits WebRTC connections.
-- A Google account to host the meeting.
+- A meeting account on one of the supported platforms.
 
 ## Quickstart
 
@@ -79,11 +81,11 @@ Keep this process running alongside the tunnel, then open [the launcher](http://
 
 ### 5. Send the agent to a meeting
 
-Create and join a meeting at [meet.new](https://meet.new/). Paste its URL into the launcher and select **Send agent**, then admit **pipecat demo** once it enters the waiting room.
+For your first test, start a Google Meet call at [meet.new](https://meet.new/). Paste the direct meeting link into the launcher, select **Send agent**, and admit **pipecat demo** if prompted. The launcher requests a four-core bot.
 
 ### 6. Try the agent
 
-Try these phrases. Each tool call also posts its result in meeting chat.
+Try the chat commands in a meeting that allows bot chat. [Recall chat support](https://docs.recall.ai/docs/sending-chat-messages)
 
 | Try saying |
 | --- |
@@ -116,13 +118,13 @@ The session defaults to 10 minutes. Set `SESSION_TIMEOUT_SECONDS` to change it.
 | `app/config.py` | Load and validate `.env`. |
 | `app/media_server.py` | Handle Recall callbacks and close meeting sessions. |
 
-Recall runs a four-core Google Meet bot with `output_media.camera.kind = "pipecat"`. The tunnel carries signaling, and WebRTC carries audio and video.
+Recall runs a four-core bot with `output_media.camera.kind = "pipecat"`. The tunnel carries signaling, and WebRTC carries audio and video.
 
 OpenAI Realtime streams speech into Simli for synchronized audio and avatar video. Five tools call Recall using the bot ID returned by Create Bot. Four control speech and listening locally.
 
 ## Boundaries and troubleshooting
 
-- If the bot is silent, say “Assistant” clearly and check chat for its mute or listening status.
+- If the bot is silent, say “Assistant” clearly. Where chat is available, check it for the agent's mute or listening status.
 - If the avatar does not appear, check provider credentials and the tunnel to port **7861**.
 - If signaling succeeds but media cannot connect, configure a TURN relay in `WEBRTC_ICE_SERVERS`. [.env.example](.env.example)
 - Chat messages are limited to 500 characters.

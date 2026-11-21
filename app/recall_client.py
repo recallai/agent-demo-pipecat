@@ -61,6 +61,18 @@ class RecallClient:
                     raise RecallError(
                         f"Recall could not confirm {action} (HTTP {response.status}). Check the meeting before trying again.",
                     )
+                if method == "POST" and path == "bot/" and response.status == 400:
+                    try:
+                        details = await response.json()
+                    except (aiohttp.ClientError, TimeoutError, ValueError):
+                        details = None
+                    message = details.get("meeting_url") if isinstance(details, dict) else None
+                    if isinstance(message, list):
+                        message = " ".join(
+                            item.strip() for item in message if isinstance(item, str) and item.strip()
+                        )
+                    if isinstance(message, str) and message.strip():
+                        raise RecallError(message.strip())
                 if not 200 <= response.status < 300:
                     hint = "Check the request settings and Recall workspace configuration."
                     if response.status in (401, 403):
@@ -91,7 +103,12 @@ class RecallClient:
             {
                 "meeting_url": meeting_url,
                 "bot_name": BOT_NAME,
-                "variant": {"google_meet": "web_4_core"},
+                "variant": {
+                    "zoom": "web_4_core",
+                    "google_meet": "web_4_core",
+                    "microsoft_teams": "web_4_core",
+                    "webex": "web_4_core",
+                },
                 "recording_config": {
                     "transcript": {
                         "provider": {"deepgram_streaming": {"model": "nova-3"}},
