@@ -1,6 +1,6 @@
 # agent-demo-pipecat
 
-Send an interactive meeting agent to Zoom, Google Meet, Microsoft Teams, or Webex. It appears as a speaking avatar, answers questions aloud, and takes spoken requests to share a webpage, post in chat, or leave the call.
+Send an interactive meeting agent to Google Meet, Zoom, Microsoft Teams, or Webex. It appears as a speaking avatar, answers questions aloud, and takes spoken requests to share a webpage, post in chat, or leave the call.
 
 Pipecat uses OpenAI Realtime for voice and Simli for the avatar. Recall connects the agent to the meeting. [Recall's Pipecat integration](https://docs.recall.ai/docs/meeting-agents-pipecat)
 
@@ -81,7 +81,7 @@ Keep this process running alongside the tunnel, then open [the launcher](http://
 
 ### 5. Send the agent to a meeting
 
-Join a Zoom, Google Meet, Microsoft Teams, or Webex meeting. Paste its join link into the launcher and select **Send agent**. The launcher requests a four-core bot. Admit **pipecat demo** if prompted.
+For your first test, start a Google Meet call at [meet.new](https://meet.new/). You can also use a link from any supported platform. Paste the direct meeting link into the launcher, select **Send agent**, and admit **pipecat demo** if prompted. The launcher requests a four-core bot.
 
 ### 6. Try the agent
 
