@@ -109,7 +109,6 @@ The session defaults to 10 minutes. Set `SESSION_TIMEOUT_SECONDS` to change it.
 | File | Responsibility |
 | --- | --- |
 | `app/web.py` | Serve the form, create a Recall bot, and run both HTTP servers. |
-| `app/meeting_url.py` | Validate meeting links. |
 | `app/templates/index.html` | Local launcher page. |
 | `app/agent.py` | Instructions, Realtime configuration, avatar startup, and cleanup. |
 | `app/meeting_agent.py` | Admit addressed requests and stream Realtime replies. |
