@@ -37,33 +37,36 @@ class MeetingRequest(BaseModel):
     @classmethod
     def validate_url(cls, value: str) -> str:
         url = value.strip()
-        error_message = "Enter a direct HTTPS meeting link from Zoom, Google Meet, Microsoft Teams, or Webex."
+        error = "Enter a direct HTTPS meeting link from Zoom, Google Meet, Microsoft Teams, or Webex."
         try:
             parsed = urlsplit(url)
-            port = parsed.port
         except ValueError:
-            raise ValueError(error_message) from None
+            raise ValueError(error) from None
+
         if (
             parsed.scheme != "https"
             or parsed.username is not None
-            or port not in (None, 443)
             or "\\" in url
             or any(char.isspace() or ord(char) < 32 for char in url)
-            or not parsed.path.strip("/")
         ):
-            raise ValueError(error_message)
+            raise ValueError(error)
 
         host = parsed.hostname or ""
         if host == "meet.google.com":
-            if parsed.fragment or not re.fullmatch(r"/[a-z]{3}-[a-z]{4}-[a-z]{3}/?", parsed.path):
-                raise ValueError(error_message)
-            return f"https://meet.google.com{parsed.path.rstrip('/')}"
-        if host in {
-            "teams.microsoft.com", "teams.cloud.microsoft", "teams.live.com", "zoom.us", "webex.com",
-        } or host.endswith((".zoom.us", ".webex.com")):
-            # Keep provider-specific passcodes and context intact for Recall.
+            # Preserve the existing room key for duplicate submissions.
+            if (
+                parsed.netloc == host
+                and not parsed.fragment
+                and re.fullmatch(r"/[a-z]{3}-[a-z]{4}-[a-z]{3}/?", parsed.path)
+            ):
+                return f"https://meet.google.com{parsed.path.rstrip('/')}"
             return url
-        raise ValueError(error_message)
+        if host in {"teams.microsoft.com", "teams.cloud.microsoft", "teams.live.com"} or any(
+            host == domain or host.endswith("." + domain)
+            for domain in ("zoom.us", "zoom.com", "zoom-x.de", "webex.com")
+        ):
+            return url
+        raise ValueError(error)
 
 
 @app.get("/")
