@@ -1,7 +1,6 @@
 """Run the local meeting launcher and its separately tunneled media server."""
 
 import asyncio
-import re
 import signal
 from contextlib import asynccontextmanager, contextmanager
 from urllib.parse import urlsplit
@@ -35,38 +34,20 @@ class MeetingRequest(BaseModel):
 
     @field_validator("meeting_url")
     @classmethod
-    def validate_url(cls, value: str) -> str:
+    def check_meeting_host(cls, value: str) -> str:
         url = value.strip()
-        error = "Enter a direct HTTPS meeting link from Zoom, Google Meet, Microsoft Teams, or Webex."
         try:
-            parsed = urlsplit(url)
+            host = urlsplit(url).hostname or ""
         except ValueError:
-            raise ValueError(error) from None
+            host = ""
 
-        if (
-            parsed.scheme != "https"
-            or parsed.username is not None
-            or "\\" in url
-            or any(char.isspace() or ord(char) < 32 for char in url)
-        ):
-            raise ValueError(error)
-
-        host = parsed.hostname or ""
-        if host == "meet.google.com":
-            # Preserve the existing room key for duplicate submissions.
-            if (
-                parsed.netloc == host
-                and not parsed.fragment
-                and re.fullmatch(r"/[a-z]{3}-[a-z]{4}-[a-z]{3}/?", parsed.path)
-            ):
-                return f"https://meet.google.com{parsed.path.rstrip('/')}"
+        domains = (
+            "meet.google.com", "zoom.us", "zoom.com", "zoom-x.de",
+            "teams.microsoft.com", "teams.cloud.microsoft", "teams.live.com", "webex.com",
+        )
+        if any(host == domain or host.endswith(f".{domain}") for domain in domains):
             return url
-        if host in {"teams.microsoft.com", "teams.cloud.microsoft", "teams.live.com"} or any(
-            host == domain or host.endswith("." + domain)
-            for domain in ("zoom.us", "zoom.com", "zoom-x.de", "webex.com")
-        ):
-            return url
-        raise ValueError(error)
+        raise ValueError("Enter a meeting link from Google Meet, Zoom, Microsoft Teams, or Webex.")
 
 
 @app.get("/")
