@@ -66,10 +66,13 @@ class RecallClient:
                         details = await response.json()
                     except (aiohttp.ClientError, TimeoutError, ValueError):
                         details = None
-                    if isinstance(details, dict) and details.get("meeting_url"):
-                        raise RecallError(
-                            "Recall could not use the meeting link. Check the direct invite and your workspace setup."
+                    message = details.get("meeting_url") if isinstance(details, dict) else None
+                    if isinstance(message, list):
+                        message = " ".join(
+                            item.strip() for item in message if isinstance(item, str) and item.strip()
                         )
+                    if isinstance(message, str) and message.strip():
+                        raise RecallError(message.strip())
                 if not 200 <= response.status < 300:
                     hint = "Check the request settings and Recall workspace configuration."
                     if response.status in (401, 403):
