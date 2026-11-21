@@ -1,10 +1,8 @@
 """Run the local meeting launcher and its separately tunneled media server."""
 
 import asyncio
-import re
 import signal
 from contextlib import asynccontextmanager, contextmanager
-from urllib.parse import urlsplit
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -13,8 +11,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, field_validator
 
 from app.config import ROOT, public_origin, require_env, validate_agent_settings
+from app.media_server import media_app, sessions
+from app.meeting_url import validate_meeting_url
 from app.recall_client import RecallClient, RecallError
-from app.media_server import sessions, media_app
 
 
 @asynccontextmanager
@@ -35,15 +34,8 @@ class MeetingRequest(BaseModel):
 
     @field_validator("meeting_url")
     @classmethod
-    def validate_meeting_url(cls, value: str) -> str:
-        parsed = urlsplit(value.strip())
-        if (
-            parsed.scheme != "https"
-            or parsed.netloc != "meet.google.com"
-            or not re.fullmatch(r"/[a-z]{3}-[a-z]{4}-[a-z]{3}/?", parsed.path)
-        ):
-            raise ValueError("Enter a Google Meet URL, such as https://meet.google.com/abc-defg-hij.")
-        return f"https://meet.google.com{parsed.path.rstrip('/')}"
+    def validate_url(cls, value: str) -> str:
+        return validate_meeting_url(value)
 
 
 @app.get("/")
@@ -80,7 +72,7 @@ async def create_meeting_agent(request: MeetingRequest):
             await sessions.bind_bot(session, bot_id)
         return {
             "bot_id": bot_id,
-            "message": "Agent requested. Admit pipecat demo in Google Meet if prompted.",
+            "message": "Agent requested. Admit pipecat demo if prompted.",
         }
     except ValueError as error:
         if session is not None:

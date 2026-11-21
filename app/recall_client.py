@@ -91,7 +91,12 @@ class RecallClient:
             {
                 "meeting_url": meeting_url,
                 "bot_name": BOT_NAME,
-                "variant": {"google_meet": "web_4_core"},
+                "variant": {
+                    "zoom": "web_4_core",
+                    "google_meet": "web_4_core",
+                    "microsoft_teams": "web_4_core",
+                    "webex": "web_4_core",
+                },
                 "recording_config": {
                     "transcript": {
                         "provider": {"deepgram_streaming": {"model": "nova-3"}},
