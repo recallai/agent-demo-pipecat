@@ -3,13 +3,12 @@
 import asyncio
 import signal
 from contextlib import asynccontextmanager, contextmanager
-from urllib.parse import urlsplit
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict
 
 from app.config import ROOT, public_origin, require_env, validate_agent_settings
 from app.media_server import media_app, sessions
@@ -30,24 +29,9 @@ pending_meetings: set[str] = set()
 
 
 class MeetingRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     meeting_url: str
-
-    @field_validator("meeting_url")
-    @classmethod
-    def check_meeting_host(cls, value: str) -> str:
-        url = value.strip()
-        try:
-            host = urlsplit(url).hostname or ""
-        except ValueError:
-            host = ""
-
-        domains = (
-            "meet.google.com", "zoom.us", "zoom.com", "zoom-x.de",
-            "teams.microsoft.com", "teams.cloud.microsoft", "teams.live.com", "webex.com",
-        )
-        if any(host == domain or host.endswith(f".{domain}") for domain in domains):
-            return url
-        raise ValueError("Enter a meeting link from Google Meet, Zoom, Microsoft Teams, or Webex.")
 
 
 @app.get("/")
